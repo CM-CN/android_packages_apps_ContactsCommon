@@ -79,8 +79,6 @@ public class BlockContactActivity extends Activity implements BlockContactDialog
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (mBlockContactHelper != null) {
-            mBlockContactHelper.destroy();
-        }
+        mBlockContactHelper.destroy();
     }
 }
