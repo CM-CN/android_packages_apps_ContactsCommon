@@ -40,7 +40,6 @@ import android.view.inputmethod.EditorInfo;
 
 import com.android.contacts.common.R;
 import com.android.contacts.common.model.dataitem.DataKind;
-import com.android.contacts.common.model.dataitem.GroupMembershipDataItem;
 import com.android.contacts.common.testing.NeededForTesting;
 import com.android.contacts.common.util.CommonDateUtils;
 import com.android.contacts.common.util.ContactDisplayUtils;
@@ -120,7 +119,7 @@ public abstract class BaseAccountType extends AccountType {
         this.accountType = null;
         this.dataSet = null;
         this.titleRes = R.string.account_phone;
-        this.iconRes = R.mipmap.ic_contacts_clr_48cv_44dp;
+        this.iconRes = R.mipmap.ic_contacts_launcher;
     }
 
     protected static EditType buildPhoneType(int type) {
@@ -303,7 +302,6 @@ public abstract class BaseAccountType extends AccountType {
         kind.typeList.add(buildEmailType(Email.TYPE_HOME));
         kind.typeList.add(buildEmailType(Email.TYPE_WORK));
         kind.typeList.add(buildEmailType(Email.TYPE_OTHER));
-        kind.typeList.add(buildEmailType(Email.TYPE_MOBILE));
         kind.typeList.add(
                 buildEmailType(Email.TYPE_CUSTOM).setSecondary(true).setCustomColumn(Email.LABEL));
 
@@ -437,8 +435,6 @@ public abstract class BaseAccountType extends AccountType {
         DataKind kind = addKind(new DataKind(GroupMembership.CONTENT_ITEM_TYPE,
                 R.string.groupsLabel, Weight.GROUP_MEMBERSHIP, true));
 
-        kind.actionHeader = new SimpleInflater(R.string.label_groups);
-        kind.actionBody = new SimpleInflater(GroupMembershipDataItem.GROUP_TITLE);
         kind.typeOverallMax = 1;
         kind.fieldList = Lists.newArrayList();
         kind.fieldList.add(new EditField(GroupMembership.GROUP_ROW_ID, -1, -1));

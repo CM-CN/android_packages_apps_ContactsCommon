@@ -20,14 +20,11 @@ import android.app.Activity;
 import android.app.Fragment;
 import android.app.LoaderManager;
 import android.app.LoaderManager.LoaderCallbacks;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.CursorLoader;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.Loader;
 import android.database.Cursor;
-import android.database.DatabaseUtils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -53,7 +50,6 @@ import com.android.common.widget.CompositeCursorAdapter.Partition;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.preference.ContactsPreferences;
 import com.android.contacts.common.util.ContactListViewUtils;
-import com.android.internal.telephony.TelephonyIntents;
 
 import java.util.Locale;
 
@@ -87,7 +83,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
     private static final String KEY_DARK_THEME = "darkTheme";
     private static final String KEY_LEGACY_COMPATIBILITY = "legacyCompatibility";
     private static final String KEY_DIRECTORY_RESULT_LIMIT = "directoryResultLimit";
-    private static final String KEY_ADDITIONAL_MIMETYPE_SEARCH = "additionalMimeTypeSearch";
 
     private static final String DIRECTORY_ID_ARG_KEY = "directoryId";
 
@@ -118,7 +113,11 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
     private View mView;
     private ListView mListView;
 
-    private String mAdditionalMimeTypeSearch;
+    /**
+     * Used to save the scrolling state of the list when the fragment is not recreated.
+     */
+    private int mListViewTopIndex;
+    private int mListViewTopOffset;
 
     /**
      * Used for keeping track of the scroll state of the list.
@@ -153,18 +152,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
     private Context mContext;
 
     private LoaderManager mLoaderManager;
-    private boolean mIgnoreSimStateChange;
-
-    private BroadcastReceiver mSIMStateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (!mIgnoreSimStateChange) {
-                mForceLoad = loadPreferences();
-                reloadData();
-            }
-            mIgnoreSimStateChange = false;
-        }
-    };
 
     private Handler mDelayedDirectorySearchHandler = new Handler() {
         @Override
@@ -269,7 +256,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         outState.putString(KEY_QUERY_STRING, mQueryString);
         outState.putInt(KEY_DIRECTORY_RESULT_LIMIT, mDirectoryResultLimit);
         outState.putBoolean(KEY_DARK_THEME, mDarkTheme);
-        outState.putString(KEY_ADDITIONAL_MIMETYPE_SEARCH, mAdditionalMimeTypeSearch);
 
         if (mListView != null) {
             outState.putParcelable(KEY_LIST_STATE, mListView.onSaveInstanceState());
@@ -282,7 +268,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         restoreSavedState(savedState);
         mAdapter = createListAdapter();
         mContactsPrefs = new ContactsPreferences(mContext);
-        restoreSavedState(savedState);
     }
 
     public void restoreSavedState(Bundle savedState) {
@@ -304,7 +289,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         mQueryString = savedState.getString(KEY_QUERY_STRING);
         mDirectoryResultLimit = savedState.getInt(KEY_DIRECTORY_RESULT_LIMIT);
         mDarkTheme = savedState.getBoolean(KEY_DARK_THEME);
-        mAdditionalMimeTypeSearch = savedState.getString(KEY_ADDITIONAL_MIMETYPE_SEARCH);
 
         // Retrieve list state. This will be applied in onLoadFinished
         mListState = savedState.getParcelable(KEY_LIST_STATE);
@@ -320,13 +304,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
 
         mDirectoryListStatus = STATUS_NOT_LOADED;
         mLoadPriorityDirectoriesOnly = true;
-
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
-        filter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
-        // Make sure to not trigger a full reload by the sticky SIM state change
-        // broadcast delivery on registration
-        mIgnoreSimStateChange = mContext.registerReceiver(mSIMStateReceiver, filter) != null;
 
         startLoading();
     }
@@ -507,7 +484,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         super.onStop();
         mContactsPrefs.unregisterChangeListener();
         mAdapter.clearPartitions();
-        mContext.unregisterReceiver(mSIMStateReceiver);
     }
 
     protected void reloadData() {
@@ -837,7 +813,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         mAdapter.setSelectionVisible(mSelectionVisible);
         mAdapter.setDirectoryResultLimit(mDirectoryResultLimit);
         mAdapter.setDarkTheme(mDarkTheme);
-        mAdapter.setAdditionalMimeTypeSearch(mAdditionalMimeTypeSearch);
     }
 
     @Override
@@ -904,8 +879,22 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
 
     @Override
     public void onPause() {
+        // Save the scrolling state of the list view
+        mListViewTopIndex = mListView.getFirstVisiblePosition();
+        View v = mListView.getChildAt(0);
+        mListViewTopOffset = (v == null) ? 0 : (v.getTop() - mListView.getPaddingTop());
+
         super.onPause();
         removePendingDirectorySearchRequests();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // Restore the selection of the list view. See b/19982820.
+        // This has to be done manually because if the list view has its emptyView set,
+        // the scrolling state will be reset when clearPartitions() is called on the adapter.
+        mListView.setSelectionFromTop(mListViewTopIndex, mListViewTopOffset);
     }
 
     /**
@@ -923,11 +912,6 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
         if (mAdapter != null) mAdapter.setDarkTheme(value);
     }
 
-    public void setAdditionalMimeTypeSearch(String value) {
-        mAdditionalMimeTypeSearch = value;
-        if (mAdapter != null) mAdapter.setAdditionalMimeTypeSearch(value);
-    }
-
     /**
      * Processes a result returned by the contact picker.
      */
@@ -939,9 +923,8 @@ public abstract class ContactEntryListFragment<T extends ContactEntryListAdapter
             new ContactsPreferences.ChangeListener() {
         @Override
         public void onChange() {
-            if(loadPreferences()) {
-                reloadData();
-            }
+            loadPreferences();
+            reloadData();
         }
     };
 

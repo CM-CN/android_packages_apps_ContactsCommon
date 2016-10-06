@@ -55,14 +55,11 @@ import android.widget.ExpandableListView.ExpandableListContextMenuInfo;
 import android.widget.TextView;
 
 import com.android.contacts.common.R;
-import com.android.contacts.common.MoreContactUtils;
 import com.android.contacts.common.model.AccountTypeManager;
 import com.android.contacts.common.model.ValuesDelta;
 import com.android.contacts.common.model.account.AccountType;
 import com.android.contacts.common.model.account.AccountWithDataSet;
 import com.android.contacts.common.model.account.GoogleAccountType;
-import com.android.contacts.common.model.account.PhoneAccountType;
-import com.android.contacts.common.model.account.SimAccountType;
 import com.android.contacts.common.util.EmptyService;
 import com.android.contacts.common.util.LocalizedNameResolver;
 import com.android.contacts.common.util.WeakAsyncTask;
@@ -132,6 +129,7 @@ public class CustomContactListFilterActivity extends Activity
             final ContentResolver resolver = context.getContentResolver();
 
             final AccountSet accounts = new AccountSet();
+            final String selection = Groups.DELETED + "!=1";
             for (AccountWithDataSet account : accountTypes.getAccounts(false)) {
                 final AccountType accountType = accountTypes.getAccountTypeForAccount(account);
                 if (accountType.isExtension() && !account.hasData(context)) {
@@ -148,7 +146,8 @@ public class CustomContactListFilterActivity extends Activity
                 if (account.dataSet != null) {
                     groupsUri.appendQueryParameter(Groups.DATA_SET, account.dataSet).build();
                 }
-                final Cursor cursor = resolver.query(groupsUri.build(), null, null, null, null);
+                final Cursor cursor = resolver.query(groupsUri.build(), null,
+                        selection, null, null);
                 if (cursor == null) {
                     continue;
                 }
@@ -592,17 +591,11 @@ public class CustomContactListFilterActivity extends Activity
 
             final AccountType accountType = mAccountTypes.getAccountType(
                     account.mType, account.mDataSet);
-            if (SimAccountType.ACCOUNT_TYPE.equals(account.mType)
-                    || PhoneAccountType.ACCOUNT_TYPE.equals(account.mType)) {
-                text1.setVisibility(View.VISIBLE);
-                text1.setText(accountType.getDisplayLabel(mContext, account.mName));
-                text2.setVisibility(View.GONE);
-            } else {
-                text1.setText(account.mName);
-                text1.setVisibility(account.mName == null ? View.GONE : View.VISIBLE);
-                text2.setText(accountType.getDisplayLabel(mContext, account.mName));
-                text2.setVisibility(View.VISIBLE);
-            }
+
+            text1.setText(account.mName);
+            text1.setVisibility(account.mName == null ? View.GONE : View.VISIBLE);
+            text2.setText(accountType.getDisplayLabel(mContext));
+
             return convertView;
         }
 
@@ -701,15 +694,10 @@ public class CustomContactListFilterActivity extends Activity
 
     /** {@inheritDoc} */
     public void onClick(View view) {
-        switch (view.getId()) {
-            case R.id.btn_done: {
-                this.doSaveAction();
-                break;
-            }
-            case R.id.btn_discard: {
-                this.finish();
-                break;
-            }
+        if (view.getId() == R.id.btn_done) {
+            this.doSaveAction();
+        } else if (view.getId() == R.id.btn_discard) {
+            this.finish();
         }
     }
 

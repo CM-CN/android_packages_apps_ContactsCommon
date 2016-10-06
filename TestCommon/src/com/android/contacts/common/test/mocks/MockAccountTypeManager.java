@@ -61,12 +61,12 @@ public class MockAccountTypeManager extends AccountTypeManager {
     }
 
     @Override
-    public List<AccountWithDataSet> getAccounts(boolean writableOnly) {
+    public List<AccountWithDataSet> getAccounts(boolean writableOnly, int flag) {
         return Arrays.asList(mAccounts);
     }
 
     @Override
-    public List<AccountWithDataSet> getAccounts(boolean writableOnly, int flag) {
+    public List<AccountWithDataSet> getAccounts(boolean writableOnly) {
         return Arrays.asList(mAccounts);
     }
 

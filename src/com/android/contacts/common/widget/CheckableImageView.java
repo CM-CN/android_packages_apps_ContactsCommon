@@ -36,10 +36,7 @@ public class CheckableImageView extends ImageView implements Checkable {
     }
 
     private void init(Context context) {
-        TypedArray a = context.obtainStyledAttributes(android.R.styleable.Theme);
-        setCheckMarkBackgroundColor(a.getColor(android.R.styleable.Theme_colorPrimary,
-                context.getResources().getColor(R.color.people_app_theme_color)));
-        a.recycle();
+        setCheckMarkBackgroundColor(context.getResources().getColor(R.color.photo_selected_color));
     }
 
     public void setCheckMarkBackgroundColor(int color) {

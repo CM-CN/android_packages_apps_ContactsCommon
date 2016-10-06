@@ -24,7 +24,6 @@ import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.RawContacts;
-import android.text.TextUtils;
 
 /**
  * Used to create {@link CursorLoader}s to load different groups of
@@ -42,7 +41,6 @@ public final class ContactTileLoaderFactory {
 
     public final static int CONTACT_PRESENCE = 7;
     public final static int CONTACT_STATUS = 8;
-    public final static int PHOTO_ID  = 9;
 
     // Only used for StrequentPhoneOnlyLoader
     public final static int PHONE_NUMBER = 7;
@@ -54,9 +52,7 @@ public final class ContactTileLoaderFactory {
     // contacts._id because the query is performed on the data table. In order to obtain the
     // contact id for strequent items, we thus have to use Phone.contact_id instead.
     public final static int CONTACT_ID_FOR_DATA = 12;
-
-    public final static int PHONE_NUMBER_MIMETYPE = 13;
-
+    public final static int DISPLAY_NAME_ALTERNATIVE = 13;
 
     private static final String[] COLUMNS = new String[] {
         Contacts._ID, // ..........................................0
@@ -68,7 +64,6 @@ public final class ContactTileLoaderFactory {
         RawContacts.ACCOUNT_NAME, //                               6
         Contacts.CONTACT_PRESENCE, // .............................7
         Contacts.CONTACT_STATUS, // ...............................8
-        Contacts.PHOTO_ID, // .....................................9
     };
 
     /**
@@ -80,7 +75,7 @@ public final class ContactTileLoaderFactory {
     @VisibleForTesting
     public static final String[] COLUMNS_PHONE_ONLY = new String[] {
         Contacts._ID, // ..........................................0
-        Contacts.DISPLAY_NAME, // .................................1
+        Contacts.DISPLAY_NAME_PRIMARY, // .........................1
         Contacts.STARRED, // ......................................2
         Contacts.PHOTO_URI, // ....................................3
         Contacts.LOOKUP_KEY, // ...................................4
@@ -88,11 +83,11 @@ public final class ContactTileLoaderFactory {
         RawContacts.ACCOUNT_NAME, //                               6
         Phone.NUMBER, // ..........................................7
         Phone.TYPE, // ............................................8
-        Phone.LABEL, // ............................................9
+        Phone.LABEL, // ...........................................9
         Phone.IS_SUPER_PRIMARY, //.................................10
         Contacts.PINNED, // .......................................11
         Phone.CONTACT_ID, //.......................................12
-        Phone.MIMETYPE //..........................................13
+        Contacts.DISPLAY_NAME_ALTERNATIVE, // .....................13
     };
 
     private static final String STARRED_ORDER = Contacts.DISPLAY_NAME+" COLLATE NOCASE ASC";
@@ -103,41 +98,10 @@ public final class ContactTileLoaderFactory {
     }
 
     public static CursorLoader createStrequentPhoneOnlyLoader(Context context) {
-        Uri.Builder builder = Contacts.CONTENT_STREQUENT_URI.buildUpon();
-                builder.appendQueryParameter(ContactsContract.STREQUENT_PHONE_ONLY, "true");
-        // Do not show contacts in disabled SIM card
-        String disabledSimFilter = MoreContactUtils.getDisabledSimFilter();
-        if (!TextUtils.isEmpty(disabledSimFilter)) {
-            builder.appendQueryParameter(RawContacts.ACCOUNT_NAME, disabledSimFilter);
-            builder.appendQueryParameter(SimContactsConstants
-                    .WITHOUT_SIM_FLAG, "true");
-        }
-        return new CursorLoader(context, builder.build(), COLUMNS_PHONE_ONLY, null, null, null);
-    }
+        Uri uri = Contacts.CONTENT_STREQUENT_URI.buildUpon()
+                .appendQueryParameter(ContactsContract.STREQUENT_PHONE_ONLY, "true").build();
 
-    public static CursorLoader createStrequentCallableExtendedLoader(Context context,
-            String additionalQueryParameterKey, String additionalQueryParameterValue) {
-        Uri.Builder builder = Contacts.CONTENT_STREQUENT_URI.buildUpon();
-        builder.appendQueryParameter(ContactsContract.STREQUENT_PHONE_ONLY, "true");
-        // Do not show contacts in disabled SIM card
-        String disabledSimFilter = MoreContactUtils.getDisabledSimFilter();
-        if (!TextUtils.isEmpty(disabledSimFilter)) {
-            builder.appendQueryParameter(RawContacts.ACCOUNT_NAME, disabledSimFilter);
-            builder.appendQueryParameter(SimContactsConstants
-                    .WITHOUT_SIM_FLAG, "true");
-        }
-        if (!TextUtils.isEmpty(additionalQueryParameterKey) &&
-                !TextUtils.isEmpty(additionalQueryParameterValue)) {
-            builder.appendQueryParameter(additionalQueryParameterKey,
-                    additionalQueryParameterValue);
-        }
-        return new CursorLoader(context, builder.build(), COLUMNS_PHONE_ONLY, null, null, null);
-    }
-
-    public static CursorLoader createStarredPhoneOnlyLoader(Context context) {
-        return new CursorLoader(context, Contacts.CONTENT_URI, COLUMNS,
-                Contacts.STARRED + "=? AND " + Contacts.HAS_PHONE_NUMBER + "=?",
-                new String[]{"1", "1"},  STARRED_ORDER);
+        return new CursorLoader(context, uri, COLUMNS_PHONE_ONLY, null, null, null);
     }
 
     public static CursorLoader createStarredLoader(Context context) {

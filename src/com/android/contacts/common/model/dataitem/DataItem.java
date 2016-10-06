@@ -146,6 +146,23 @@ public class DataItem implements Collapser.Collapsible<DataItem> {
     }
 
     /**
+     * Indicates the carrier presence value for the current {@link DataItem}.
+     *
+     * @return {@link Data#CARRIER_PRESENCE_VT_CAPABLE} if the {@link DataItem} supports carrier
+     *      video calling, {@code 0} otherwise.
+     */
+    public int getCarrierPresence() {
+        if (hasCarrierPresence())
+            return mContentValues.getAsInteger(Data.CARRIER_PRESENCE);
+        return 0;
+    }
+
+    private boolean hasCarrierPresence() {
+        return mContentValues.containsKey(Data.CARRIER_PRESENCE)
+                && mContentValues.getAsInteger(Data.CARRIER_PRESENCE) != null;
+    }
+
+    /**
      * This builds the data string depending on the type of data item by using the generic
      * DataKind object underneath.
      */

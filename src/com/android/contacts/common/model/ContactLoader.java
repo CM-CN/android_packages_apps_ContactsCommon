@@ -40,20 +40,19 @@ import android.util.Log;
 
 import com.android.contacts.common.GeoUtil;
 import com.android.contacts.common.GroupMetaData;
+import com.android.contacts.common.compat.CompatUtils;
 import com.android.contacts.common.model.account.AccountType;
 import com.android.contacts.common.model.account.AccountTypeWithDataSet;
-
-import com.android.contacts.common.model.dataitem.DataItem;
-import com.android.contacts.common.model.dataitem.GroupMembershipDataItem;
-import com.android.contacts.common.model.dataitem.PhoneDataItem;
-import com.android.contacts.common.model.dataitem.PhotoDataItem;
 import com.android.contacts.common.util.Constants;
 import com.android.contacts.common.util.ContactLoaderUtils;
 import com.android.contacts.common.util.DataStatus;
 import com.android.contacts.common.util.UriUtils;
-
+import com.android.contacts.common.model.dataitem.DataItem;
+import com.android.contacts.common.model.dataitem.PhoneDataItem;
+import com.android.contacts.common.model.dataitem.PhotoDataItem;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
@@ -95,14 +94,6 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
     private ForceLoadContentObserver mObserver;
     private final Set<Long> mNotifiedRawContactIds = Sets.newHashSet();
 
-    /**
-     * If loading from an encoded contact entity, there are two
-     * possible schemas that can be used.
-     */
-    public enum EncodedContactEntitySchemaVersion {
-        ORIGINAL, ENHANCED_CALLER_META_DATA
-    }
-
     public ContactLoader(Context context, Uri lookupUri, boolean postViewNotification) {
         this(context, lookupUri, false, false, postViewNotification, false);
     }
@@ -124,7 +115,7 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
      * social stream items).
      */
     private static class ContactQuery {
-        static final String[] COLUMNS = new String[] {
+        static final String[] COLUMNS_INTERNAL = new String[] {
                 Contacts.NAME_RAW_CONTACT_ID,
                 Contacts.DISPLAY_NAME_SOURCE,
                 Contacts.LOOKUP_KEY,
@@ -194,8 +185,18 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
                 Contacts.IS_USER_PROFILE,
 
                 Data.TIMES_USED,
-                Data.LAST_TIME_USED,
+                Data.LAST_TIME_USED
         };
+
+        static final String[] COLUMNS;
+
+        static {
+            List<String> projectionList = Lists.newArrayList(COLUMNS_INTERNAL);
+            if (CompatUtils.isMarshmallowCompatible()) {
+                projectionList.add(Data.CARRIER_PRESENCE);
+            }
+            COLUMNS = projectionList.toArray(new String[projectionList.size()]);
+        }
 
         public static final int NAME_RAW_CONTACT_ID = 0;
         public static final int DISPLAY_NAME_SOURCE = 1;
@@ -267,6 +268,7 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
 
         public static final int TIMES_USED = 62;
         public static final int LAST_TIME_USED = 63;
+        public static final int CARRIER_PRESENCE = 64;
     }
 
     /**
@@ -310,8 +312,13 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
         public static final int FAVORITES = 6;
     }
 
+    public void setLookupUri(Uri lookupUri) {
+        mLookupUri = lookupUri;
+    }
+
     @Override
     public Contact loadInBackground() {
+        Log.e(TAG, "loadInBackground=" + mLookupUri);
         try {
             final ContentResolver resolver = getContext().getContentResolver();
             final Uri uriCurrentFormat = ContactLoaderUtils.ensureIsContactUri(
@@ -329,8 +336,7 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
                 resultIsCached = true;
             } else {
                 if (uriCurrentFormat.getLastPathSegment().equals(Constants.LOOKUP_URI_ENCODED)) {
-                    result = loadEncodedContactEntity(uriCurrentFormat,
-                            mLookupUri, EncodedContactEntitySchemaVersion.ORIGINAL);
+                    result = loadEncodedContactEntity(uriCurrentFormat, mLookupUri);
                 } else {
                     result = loadContactEntity(resolver, uriCurrentFormat);
                 }
@@ -372,118 +378,84 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
      */
     public static Contact parseEncodedContactEntity(Uri lookupUri)  {
         try {
-            return loadEncodedContactEntity(lookupUri, lookupUri, null);
+            return loadEncodedContactEntity(lookupUri, lookupUri);
         } catch (JSONException je) {
             return null;
         }
     }
 
+    private static Contact loadEncodedContactEntity(Uri uri, Uri lookupUri) throws JSONException {
+        final String jsonString = uri.getEncodedFragment();
+        final JSONObject json = new JSONObject(jsonString);
 
-    public static Contact parseEncodedContactEntity(Uri lookupUri,
-            EncodedContactEntitySchemaVersion schemaVersion)  {
-        try {
-            return loadEncodedContactEntity(lookupUri, lookupUri, schemaVersion);
-        } catch (JSONException je) {
-            return null;
-        }
-    }
+        final long directoryId =
+                Long.valueOf(uri.getQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY));
 
-    private static Contact loadEncodedContactEntity(Uri uri,
-            Uri lookupUri, EncodedContactEntitySchemaVersion schemaVersion) throws JSONException {
-        if (lookupUri == null) {
-            return null;
-        }
+        final String displayName = json.optString(Contacts.DISPLAY_NAME);
+        final String altDisplayName = json.optString(
+                Contacts.DISPLAY_NAME_ALTERNATIVE, displayName);
+        final int displayNameSource = json.getInt(Contacts.DISPLAY_NAME_SOURCE);
+        final String photoUri = json.optString(Contacts.PHOTO_URI, null);
+        final Contact contact = new Contact(
+                uri, uri,
+                lookupUri,
+                directoryId,
+                null /* lookupKey */,
+                -1 /* id */,
+                -1 /* nameRawContactId */,
+                displayNameSource,
+                0 /* photoId */,
+                photoUri,
+                displayName,
+                altDisplayName,
+                null /* phoneticName */,
+                false /* starred */,
+                null /* presence */,
+                false /* sendToVoicemail */,
+                null /* customRingtone */,
+                false /* isUserProfile */);
 
-        if (schemaVersion == EncodedContactEntitySchemaVersion.ENHANCED_CALLER_META_DATA) {
-            return new ContactBuilder(uri).build();
+        contact.setStatuses(new ImmutableMap.Builder<Long, DataStatus>().build());
+
+        final String accountName = json.optString(RawContacts.ACCOUNT_NAME, null);
+        final String directoryName = uri.getQueryParameter(Directory.DISPLAY_NAME);
+        if (accountName != null) {
+            final String accountType = json.getString(RawContacts.ACCOUNT_TYPE);
+            contact.setDirectoryMetaData(directoryName, null, accountName, accountType,
+                    json.optInt(Directory.EXPORT_SUPPORT,
+                            Directory.EXPORT_SUPPORT_SAME_ACCOUNT_ONLY));
         } else {
-            final String jsonString = uri.getEncodedFragment();
-            final JSONObject json = new JSONObject(jsonString);
-
-            final long directoryId =
-                    Long.valueOf(uri.getQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY));
-
-            final String displayName = json.optString(Contacts.DISPLAY_NAME);
-            final String altDisplayName = json.optString(
-                    Contacts.DISPLAY_NAME_ALTERNATIVE, displayName);
-            final int displayNameSource = json.getInt(Contacts.DISPLAY_NAME_SOURCE);
-            final String photoUri = json.optString(Contacts.PHOTO_URI, null);
-            final Contact contact = new Contact(
-                    uri, uri,
-                    lookupUri,
-                    directoryId,
-                    null /* lookupKey */,
-                    -1 /* id */,
-                    -1 /* nameRawContactId */,
-                    displayNameSource,
-                    0 /* photoId */,
-                    photoUri,
-                    displayName,
-                    altDisplayName,
-                    null /* phoneticName */,
-                    false /* starred */,
-                    null /* presence */,
-                    false /* sendToVoicemail */,
-                    null /* customRingtone */,
-                    false /* isUserProfile */);
-
-            contact.setStatuses(new ImmutableMap.Builder<Long, DataStatus>().build());
-
-            final String accountName = json.optString(RawContacts.ACCOUNT_NAME, null);
-            final String directoryName = uri.getQueryParameter(Directory.DISPLAY_NAME);
-            if (accountName != null) {
-                final String accountType = json.getString(RawContacts.ACCOUNT_TYPE);
-                contact.setDirectoryMetaData(directoryName, null, accountName, accountType,
-                        json.optInt(Directory.EXPORT_SUPPORT,
-                                Directory.EXPORT_SUPPORT_SAME_ACCOUNT_ONLY));
-            } else {
-                contact.setDirectoryMetaData(directoryName, null, null, null,
-                        json.optInt(Directory.EXPORT_SUPPORT, Directory.EXPORT_SUPPORT_ANY_ACCOUNT));
-            }
-
-            final ContentValues values = new ContentValues();
-            values.put(Data._ID, -1);
-            values.put(Data.CONTACT_ID, -1);
-            final RawContact rawContact = new RawContact(values);
-
-            final JSONObject items = json.getJSONObject(Contacts.CONTENT_ITEM_TYPE);
-            final Iterator keys = items.keys();
-            while (keys.hasNext()) {
-                final String mimetype = (String) keys.next();
-
-                // Could be single object, int, array or a string.
-                JSONObject obj = items.optJSONObject(mimetype);
-                final int num = items.optInt(mimetype, -1);
-                final JSONArray array = items.optJSONArray(mimetype);
-                final String str = items.optString(mimetype, null);
-                if (array != null) {
-                    for (int i = 0; i < array.length(); i++) {
-                        final JSONObject item = array.getJSONObject(i);
-                        processOneRecord(rawContact, item, mimetype);
-                    }
-                } else if (num != -1) {
-                    obj = new JSONObject();
-                    obj.put(mimetype, num);
-                    processOneRecord(rawContact, obj, mimetype);
-                } else if (obj != null) {
-                    // when obj is true, str type is true too, so handle obj type first
-                    processOneRecord(rawContact, obj, mimetype);
-                } else if (str != null){
-                    // when it's a true string, obj is null
-                    obj = new JSONObject();
-                    obj.put(mimetype, str);
-                    processOneRecord(rawContact, obj, mimetype);
-                } else {
-                    // unknown type
-                    continue;
-                }
-            }
-
-            contact.setRawContacts(new ImmutableList.Builder<RawContact>()
-                    .add(rawContact)
-                    .build());
-            return contact;
+            contact.setDirectoryMetaData(directoryName, null, null, null,
+                    json.optInt(Directory.EXPORT_SUPPORT, Directory.EXPORT_SUPPORT_ANY_ACCOUNT));
         }
+
+        final ContentValues values = new ContentValues();
+        values.put(Data._ID, -1);
+        values.put(Data.CONTACT_ID, -1);
+        final RawContact rawContact = new RawContact(values);
+
+        final JSONObject items = json.getJSONObject(Contacts.CONTENT_ITEM_TYPE);
+        final Iterator keys = items.keys();
+        while (keys.hasNext()) {
+            final String mimetype = (String) keys.next();
+
+            // Could be single object or array.
+            final JSONObject obj = items.optJSONObject(mimetype);
+            if (obj == null) {
+                final JSONArray array = items.getJSONArray(mimetype);
+                for (int i = 0; i < array.length(); i++) {
+                    final JSONObject item = array.getJSONObject(i);
+                    processOneRecord(rawContact, item, mimetype);
+                }
+            } else {
+                processOneRecord(rawContact, obj, mimetype);
+            }
+        }
+
+        contact.setRawContacts(new ImmutableList.Builder<RawContact>()
+                .add(rawContact)
+                .build());
+        return contact;
     }
 
     private static void processOneRecord(RawContact rawContact, JSONObject item, String mimetype)
@@ -760,6 +732,9 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
         cursorColumnToContentValues(cursor, cv, ContactQuery.CHAT_CAPABILITY);
         cursorColumnToContentValues(cursor, cv, ContactQuery.TIMES_USED);
         cursorColumnToContentValues(cursor, cv, ContactQuery.LAST_TIME_USED);
+        if (CompatUtils.isMarshmallowCompatible()) {
+            cursorColumnToContentValues(cursor, cv, ContactQuery.CARRIER_PRESENCE);
+        }
 
         return cv;
     }
@@ -910,30 +885,7 @@ public class ContactLoader extends AsyncTaskLoader<Contact> {
                 cursor.close();
             }
         }
-
-        final ImmutableList<GroupMetaData> metaDataList = groupListBuilder.build();
-        result.setGroupMetaData(metaDataList);
-
-        for (RawContact rawContact : result.getRawContacts()) {
-            for (DataItem dataItem : rawContact.getDataItems()) {
-                if (!(dataItem instanceof GroupMembershipDataItem)) {
-                    continue;
-                }
-
-                final GroupMembershipDataItem groupItem = (GroupMembershipDataItem) dataItem;
-                final Long groupId = groupItem.getGroupRowId();
-                if (groupId == null) {
-                    continue;
-                }
-
-                for (GroupMetaData groupData : metaDataList) {
-                    if (groupData.getGroupId() == groupId) {
-                        groupItem.setGroupMetaData(groupData);
-                        break;
-                    }
-                }
-            }
-        }
+        result.setGroupMetaData(groupListBuilder.build());
     }
 
     /**

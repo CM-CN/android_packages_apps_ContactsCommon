@@ -76,6 +76,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -379,8 +380,12 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
          * @param defaultImageRequest {@link DefaultImageRequest} object that specifies how a
          * default letter tile avatar should be drawn.
          */
-        public abstract void applyDefaultImage(ImageView view, Account account, int extent,
-                boolean darkTheme, DefaultImageRequest defaultImageRequest);
+        public abstract void applyDefaultImage(ImageView view, int extent, boolean darkTheme,
+                DefaultImageRequest defaultImageRequest);
+
+        public void applyDefaultImage(ImageView view, Account account, int extent,
+                boolean darkTheme, DefaultImageRequest defaultImageRequest) {
+        }
     }
 
     /**
@@ -389,6 +394,12 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
      * background and the type of letter is decided based on the contact's details.
      */
     private static class LetterTileDefaultImageProvider extends DefaultImageProvider {
+        @Override
+        public void applyDefaultImage(ImageView view, int extent, boolean darkTheme,
+                DefaultImageRequest defaultImageRequest) {
+            applyDefaultImage(view, null, extent, darkTheme, defaultImageRequest);
+        }
+
         @Override
         public void applyDefaultImage(ImageView view, Account account, int extent,
                 boolean darkTheme, DefaultImageRequest defaultImageRequest) {
@@ -400,16 +411,17 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
         public static Drawable getDefaultImageForContact(Context context, Resources resources,
                 DefaultImageRequest defaultImageRequest, Account account) {
             final LetterTileDrawable drawable = new LetterTileDrawable(
-                    context, resources, account);
+                    resources, context, account);
             if (defaultImageRequest != null) {
                 // If the contact identifier is null or empty, fallback to the
                 // displayName. In that case, use {@code null} for the contact's
                 // display name so that a default bitmap will be used instead of a
                 // letter
                 if (TextUtils.isEmpty(defaultImageRequest.identifier)) {
-                    drawable.setContactDetails(null, defaultImageRequest.displayName);
+                    drawable.setLetterAndColorFromContactDetails(null,
+                            defaultImageRequest.displayName);
                 } else {
-                    drawable.setContactDetails(defaultImageRequest.displayName,
+                    drawable.setLetterAndColorFromContactDetails(defaultImageRequest.displayName,
                             defaultImageRequest.identifier);
                 }
                 drawable.setContactType(defaultImageRequest.contactType);
@@ -425,8 +437,8 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
         private static Drawable sDrawable;
 
         @Override
-        public void applyDefaultImage(ImageView view, Account account, int extent,
-                boolean darkTheme, DefaultImageRequest defaultImageRequest) {
+        public void applyDefaultImage(ImageView view, int extent, boolean darkTheme,
+                DefaultImageRequest defaultImageRequest) {
             if (sDrawable == null) {
                 Context context = view.getContext();
                 sDrawable = new ColorDrawable(context.getResources().getColor(
@@ -545,20 +557,6 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
     }
 
     /**
-     * Used to request bitmap of a Contact photo
-     *
-     * @param photoUri Uri of the contact's photo
-     * @param imgView Sentinel used to triage this request through the existing contact bitmap
-     *                loading pipeline. The contact Bitmap won't be loaded into this imageview.
-     * @param widthHint suggest bitmap dimensions
-     * @param cb Callback via which a contact's bitmap is made available to the requester
-     */
-    public abstract void getBitmapForContact(Uri photoUri, ImageView imgView, int widthHint,
-            PhotoFetcherCallback cb);
-
-    public abstract void getBitmapForContact(long photoId, ImageView imgView, int widthHint,
-            PhotoFetcherCallback cb);
-    /**
      * Calls {@link #loadPhoto(ImageView, Uri, boolean, boolean, DefaultImageRequest,
      * DefaultImageProvider)} with {@link #DEFAULT_AVATAR} and with the assumption, that
      * the image is a thumbnail.
@@ -634,13 +632,6 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
     // ComponentCallbacks2
     @Override
     public void onTrimMemory(int level) {
-    }
-
-    /**
-     * callbacks associated with contact image requests
-     */
-    public interface PhotoFetcherCallback {
-        public void onFetchComplete(Bitmap bitmap);
     }
 }
 
@@ -894,8 +885,8 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
             mPendingRequests.remove(view);
         } else {
             if (DEBUG) Log.d(TAG, "loadPhoto request: " + photoId);
-            loadPhotoByIdOrUri(view, Request.createFromThumbnailId(photoId, account, darkTheme,
-                    isCircular, defaultProvider, defaultImageRequest));
+            loadPhotoByIdOrUri(view, Request.createFromThumbnailId(photoId, darkTheme, isCircular,
+                    defaultProvider));
         }
     }
 
@@ -914,8 +905,8 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
                 createAndApplyDefaultImageForUri(view, account, photoUri, requestedExtent,
                         darkTheme, isCircular, defaultProvider);
             } else {
-                loadPhotoByIdOrUri(view, Request.createFromUri(photoUri, account, requestedExtent,
-                        darkTheme, isCircular, defaultProvider, defaultImageRequest));
+                loadPhotoByIdOrUri(view, Request.createFromUri(photoUri, requestedExtent,
+                        darkTheme, isCircular, defaultProvider));
             }
         }
     }
@@ -941,74 +932,6 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
         }
     }
 
-    /**
-     * Checks the cache to satisfy the bitmap request. If not found, requests the loader for
-     * the contact's image.
-     */
-    @Override
-    public void getBitmapForContact(Uri photoUri, ImageView imgView, int widthHint,
-            PhotoFetcherCallback cb) {
-        // ensure request is for a valid contact uri before checking for bitmap
-        // or posting a load request
-        if (photoUri == null || isDefaultImageUri(photoUri)) return;
-
-        // formulate the contact bitmap request
-        Request request = Request.createBitmapOnly(photoUri, widthHint, cb);
-        getBitmapForContact(imgView, request);
-    }
-
-    @Override
-    public void getBitmapForContact(long photoId, ImageView imgView, int widthHint,
-            PhotoFetcherCallback cb) {
-        if (photoId <= 0) return;
-        Request request = Request.createBitmapOnly(photoId, widthHint, cb);
-        getBitmapForContact(imgView, request);
-    }
-
-    private void getBitmapForContact(ImageView imgView, Request request) {
-        boolean done = decodeContactBitmapFromCache(request);
-        // if not in cache, put request into loading queue
-        if (!done) {
-            mPendingRequests.put(imgView, request);
-            if (!mPaused) {
-                requestLoading();
-            }
-        }
-    }
-
-    /**
-     * Checks the cache for the contact bitmap's bytes, decodes those bytes, and sends the
-     * decoded bitmap to the requester
-     *
-     * @return true if the bitmap is present and the cache and has been sent to the requester
-     */
-    private boolean decodeContactBitmapFromCache(Request request) {
-        Uri photoUri = request.getUri();
-        PhotoFetcherCallback cb = request.getCallback();
-
-        // check cache for the bitmap bytes
-        BitmapHolder holder = mBitmapHolderCache.get(request.getKey());
-        if (holder != null && holder.bytes != null && holder.bytes.length != 0) {
-            // inflate bitmap from cache bytes
-            int sampleSize =
-                    BitmapUtil.findOptimalSampleSize(holder.originalSmallerExtent,
-                            request.getRequestedExtent());
-            if (holder.decodedSampleSize == sampleSize && holder.bitmapRef != null &&
-                    holder.bitmapRef.get() != null) {
-                // already has a decoded bitmap at the requested size
-                cb.onFetchComplete(holder.bitmapRef.get());
-            } else {
-                Bitmap bitmap = BitmapUtil.decodeBitmapFromBytes(holder.bytes, sampleSize);
-                // the decoded bitmap won't be stored in the BitmapHolder cache
-                cb.onFetchComplete(bitmap);
-            }
-            return true;
-        }
-
-        // cache doesn't contain the requested bitmap
-        return false;
-    }
-
     @Override
     public void removePhoto(ImageView view) {
         view.setImageDrawable(null);
@@ -1026,13 +949,13 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
             mPendingRequests.clear();
             return;
         }
-        ImageView[] requestSetCopy = mPendingRequests.keySet().toArray(new ImageView[
-                mPendingRequests.size()]);
-        for (ImageView imageView : requestSetCopy) {
+        final Iterator<Entry<ImageView, Request>> iterator = mPendingRequests.entrySet().iterator();
+        while (iterator.hasNext()) {
+            final ImageView imageView = iterator.next().getKey();
             // If an ImageView is orphaned (currently scrap) or a child of fragmentRootView, then
             // we can safely remove its request.
             if (imageView.getParent() == null || isChildView(fragmentRootView, imageView)) {
-                mPendingRequests.remove(imageView);
+                iterator.remove();
             }
         }
     }
@@ -1065,7 +988,7 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
      */
     private boolean loadCachedPhoto(ImageView view, Request request, boolean fadeIn) {
         BitmapHolder holder = mBitmapHolderCache.get(request.getKey());
-        if (holder == null || holder == BITMAP_UNAVAILABLE) {
+        if (holder == null) {
             // The bitmap has not been loaded ==> show default avatar
             request.applyDefaultImage(view, request.mIsCircular);
             return false;
@@ -1282,18 +1205,12 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
      * photos still haven't been loaded, sends another request for image loading.
      */
     private void processLoadedImages() {
-        Iterator<ImageView> iterator = mPendingRequests.keySet().iterator();
+        final Iterator<Entry<ImageView, Request>> iterator = mPendingRequests.entrySet().iterator();
         while (iterator.hasNext()) {
-            ImageView view = iterator.next();
-            Request request = mPendingRequests.get(view);
-            boolean loaded = false;
-            if (request.isBitmapOnly()) {
-                loaded = decodeContactBitmapFromCache(request);
-            } else {
-                // TODO: Temporarily disable contact photo fading in, until issues with
-                // RoundedBitmapDrawables overlapping the default image drawables are resolved.
-                loaded = loadCachedPhoto(view, request, false);
-            }
+            final Entry<ImageView, Request> entry = iterator.next();
+            // TODO: Temporarily disable contact photo fading in, until issues with
+            // RoundedBitmapDrawables overlapping the default image drawables are resolved.
+            final boolean loaded = loadCachedPhoto(entry.getKey(), entry.getValue(), false);
             if (loaded) {
                 iterator.remove();
             }
@@ -1759,86 +1676,33 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
     private static final class Request {
         private final long mId;
         private final Uri mUri;
-        private final Account mAccount;
         private final boolean mDarkTheme;
         private final int mRequestedExtent;
         private final DefaultImageProvider mDefaultProvider;
-        // Whether or not the contact photo is to be displayed as a circle
+        /**
+         * Whether or not the contact photo is to be displayed as a circle
+         */
         private final boolean mIsCircular;
 
-        // params for bitmap requests
-        private boolean mIsBitmapOnly;
-        private PhotoFetcherCallback mCallback;
-        private DefaultImageRequest mDefaultImageRequest;
-
-        private Request(long id, Uri uri, Account account, int requestedExtent, boolean darkTheme,
-                boolean isCircular, DefaultImageProvider defaultProvider, DefaultImageRequest defaultImageRequest) {
+        private Request(long id, Uri uri, int requestedExtent, boolean darkTheme,
+                boolean isCircular, DefaultImageProvider defaultProvider) {
             mId = id;
             mUri = uri;
-            mAccount = account;
             mDarkTheme = darkTheme;
             mIsCircular = isCircular;
             mRequestedExtent = requestedExtent;
             mDefaultProvider = defaultProvider;
-            mDefaultImageRequest = defaultImageRequest;
         }
 
-        public static Request createFromThumbnailId(long id, Account account, boolean darkTheme,
-                boolean isCircular, DefaultImageProvider defaultProvider,
-                DefaultImageRequest defaultImageRequest) {
-            return new Request(id, null /* no URI */, null /* no account */, -1, darkTheme,
-                    isCircular, defaultProvider, defaultImageRequest);
+        public static Request createFromThumbnailId(long id, boolean darkTheme, boolean isCircular,
+                DefaultImageProvider defaultProvider) {
+            return new Request(id, null /* no URI */, -1, darkTheme, isCircular, defaultProvider);
         }
 
         public static Request createFromUri(Uri uri, int requestedExtent, boolean darkTheme,
                 boolean isCircular, DefaultImageProvider defaultProvider) {
-            return createFromUri(uri, null /* no account */ ,requestedExtent, darkTheme, isCircular,
-                    defaultProvider, null);
-        }
-
-        public static Request createFromUri(Uri uri, Account account, int requestedExtent,
-                boolean darkTheme, boolean isCircular, DefaultImageProvider defaultProvider,
-                DefaultImageRequest defaultImageRequest) {
-            return new Request(0 /* no ID */, uri, account, requestedExtent, darkTheme, isCircular,
-                    defaultProvider, defaultImageRequest);
-        }
-
-        public static Request createBitmapOnly(Uri uri, int requestedExtent,
-                                               PhotoFetcherCallback cb) {
-            return createBitmapOnly(uri, null /* no account */ , requestedExtent, cb, null);
-        }
-
-        public static Request createBitmapOnly(Uri uri, Account account, int requestedExtent,
-                PhotoFetcherCallback cb, DefaultImageRequest defaultImageRequest) {
-            Request request = new Request(0, uri, account, requestedExtent, false, false, null,
-                    defaultImageRequest);
-            request.setBitmapOnly();
-            request.mCallback = cb;
-
-            return request;
-        }
-
-        public static Request createBitmapOnly(long photoId, int requestedExtent,
-                PhotoFetcherCallback cb) {
-            return createBitmapOnly(photoId, requestedExtent, cb, null);
-        }
-
-        public static Request createBitmapOnly(long photoId, int requestedExtent,
-                PhotoFetcherCallback cb, DefaultImageRequest defaultImageRequest) {
-            Request request = new Request(photoId, null, null, requestedExtent, false, false, null,
-                    defaultImageRequest);
-            request.setBitmapOnly();
-            request.mCallback = cb;
-
-            return request;
-        }
-
-        public boolean isBitmapOnly() {
-            return mIsBitmapOnly;
-        }
-
-        public PhotoFetcherCallback getCallback() {
-            return mCallback;
+            return new Request(0 /* no ID */, uri, requestedExtent, darkTheme, isCircular,
+                    defaultProvider);
         }
 
         public boolean isUriRequest() {
@@ -1855,10 +1719,6 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
 
         public int getRequestedExtent() {
             return mRequestedExtent;
-        }
-
-        public void setBitmapOnly() {
-            mIsBitmapOnly = true;
         }
 
         @Override
@@ -1892,29 +1752,26 @@ class ContactPhotoManagerImpl extends ContactPhotoManager implements Callback {
         }
 
         /**
-         * Applies the default image to the current view. The original {@link DefaultImageRequest},
-         * if present, will be passed along to the {@link DefaultImageProvider}. Otherwise, a
-         * default {@link DefaultImageRequest} is used based on the uri type.
+         * Applies the default image to the current view. If the request is URI-based, looks for
+         * the contact type encoded fragment to determine if this is a request for a business photo,
+         * in which case we will load the default business photo.
          *
          * @param view The current image view to apply the image to.
          * @param isCircular Whether the image is circular or not.
          */
         public void applyDefaultImage(ImageView view, boolean isCircular) {
-            DefaultImageRequest request = mDefaultImageRequest;
+            final DefaultImageRequest request;
 
-            if (request == null) {
-                if (isCircular) {
-                    request = ContactPhotoManager.isBusinessContactUri(mUri)
-                            ? DefaultImageRequest.EMPTY_CIRCULAR_BUSINESS_IMAGE_REQUEST
-                            : DefaultImageRequest.EMPTY_CIRCULAR_DEFAULT_IMAGE_REQUEST;
-                } else {
-                    request = ContactPhotoManager.isBusinessContactUri(mUri)
-                            ? DefaultImageRequest.EMPTY_DEFAULT_BUSINESS_IMAGE_REQUEST
-                            : DefaultImageRequest.EMPTY_DEFAULT_IMAGE_REQUEST;
-                }
+            if (isCircular) {
+                request = ContactPhotoManager.isBusinessContactUri(mUri)
+                        ? DefaultImageRequest.EMPTY_CIRCULAR_BUSINESS_IMAGE_REQUEST
+                        : DefaultImageRequest.EMPTY_CIRCULAR_DEFAULT_IMAGE_REQUEST;
+            } else {
+                request = ContactPhotoManager.isBusinessContactUri(mUri)
+                        ? DefaultImageRequest.EMPTY_DEFAULT_BUSINESS_IMAGE_REQUEST
+                        : DefaultImageRequest.EMPTY_DEFAULT_IMAGE_REQUEST;
             }
-            mDefaultProvider.applyDefaultImage(view, mAccount, mRequestedExtent, mDarkTheme,
-                    request);
+            mDefaultProvider.applyDefaultImage(view, mRequestedExtent, mDarkTheme, request);
         }
     }
 }

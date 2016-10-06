@@ -67,7 +67,6 @@ public class VCardService extends Service {
     /* package */ static final String CACHE_FILE_PREFIX = "import_tmp_";
 
     /* package */ static final String X_VCARD_MIME_TYPE = "text/x-vcard";
-    private String selExport = "";
 
     private class CustomMediaScannerConnectionClient implements MediaScannerConnectionClient {
         final MediaScannerConnection mConnection;
@@ -190,10 +189,7 @@ public class VCardService extends Service {
 
     public synchronized void handleExportRequest(ExportRequest request,
             VCardImportExportListener listener) {
-        ExportProcessor processor = new ExportProcessor(this, request, mCurrentJobId,
-                mCallingActivity);
-        processor.setSelExport(selExport);
-        if (tryExecute(processor)) {
+        if (tryExecute(new ExportProcessor(this, request, mCurrentJobId, mCallingActivity))) {
             final String path = request.destUri.getEncodedPath();
             if (DEBUG) Log.d(LOG_TAG, "Reserve the path " + path);
             if (!mReservedDestination.add(path)) {
@@ -215,10 +211,6 @@ public class VCardService extends Service {
                 listener.onExportFailed(request);
             }
         }
-    }
-
-    public void setSelExport(String sel) {
-        selExport = sel;
     }
 
     /**

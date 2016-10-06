@@ -95,7 +95,7 @@ public abstract class ContactTileView extends FrameLayout {
     public void loadFromContact(ContactEntry entry) {
 
         if (entry != null) {
-            mName.setText(getNameForView(entry.name));
+            mName.setText(getNameForView(entry));
             mLookupUri = entry.lookupUri;
 
             if (mStatus != null) {
@@ -126,7 +126,8 @@ public abstract class ContactTileView extends FrameLayout {
             setVisibility(View.VISIBLE);
 
             if (mPhotoManager != null) {
-                DefaultImageRequest request = getDefaultImageRequest(entry.name, entry.lookupKey);
+                DefaultImageRequest request = getDefaultImageRequest(entry.namePrimary,
+                        entry.lookupKey);
                 configureViewForImage(entry.photoUri == null);
                 if (mPhoto != null) {
                     mPhotoManager.loadPhoto(mPhoto, entry.photoUri,
@@ -147,9 +148,9 @@ public abstract class ContactTileView extends FrameLayout {
             }
 
             if (mPushState != null) {
-                mPushState.setContentDescription(entry.name);
+                mPushState.setContentDescription(entry.namePrimary);
             } else if (mQuickContact != null) {
-                mQuickContact.setContentDescription(entry.name);
+                mQuickContact.setContentDescription(entry.namePrimary);
             }
         } else {
             setVisibility(View.INVISIBLE);
@@ -180,8 +181,8 @@ public abstract class ContactTileView extends FrameLayout {
      * Returns the string that should actually be displayed as the contact's name. Subclasses
      * can override this to return formatted versions of the name - i.e. first name only.
      */
-    protected String getNameForView(String name) {
-        return name;
+    protected String getNameForView(ContactEntry contactEntry) {
+        return contactEntry.namePrimary;
     }
 
     /**
@@ -232,7 +233,7 @@ public abstract class ContactTileView extends FrameLayout {
         /**
          * Notification that the specified number is to be called.
          */
-        void onCallNumberDirectly(String phoneNumber, String mimeType);
+        void onCallNumberDirectly(String phoneNumber);
         /**
          * @return The width of each tile. This doesn't have to be a precise number (e.g. paddings
          *         can be ignored), but is used to load the correct picture size from the database

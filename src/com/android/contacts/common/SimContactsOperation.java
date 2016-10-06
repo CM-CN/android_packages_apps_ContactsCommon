@@ -48,6 +48,7 @@ import android.provider.ContactsContract.RawContacts;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.TelephonyManager;
 import android.telephony.SubscriptionManager;
+import android.telephony.SubscriptionInfo;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -62,19 +63,24 @@ public class SimContactsOperation {
     private static final int UPDATE_TOKEN = 2;
     private static final int DELETE_TOKEN = 3;
 
-    public static final String[] ACCOUNT_PROJECTION = new String[] {
-        RawContacts._ID,
-        RawContacts.CONTACT_ID,
+    public static final String[] CONTACT_PROJECTION = new String[] {
+        Contacts.Entity.RAW_CONTACT_ID,
+        Contacts.Entity.CONTACT_ID,
         RawContacts.ACCOUNT_NAME,
         RawContacts.ACCOUNT_TYPE,
+        Data.DATA1,
+        Data.DATA2,
+        Data.MIMETYPE,
     };
 
 
-    private static final int ACCOUNT_COLUMN_RAW_ID = 0;
-    private static final int ACCOUNT_COLUMN_CONTACT_ID = 1;
-    private static final int ACCOUNT_COLUMN_NAME = 2;
-    private static final int ACCOUNT_COLUMN_TYPE = 3;
-    private static final int ACCOUNT_COLUMN_PHONE_NAME = 4;
+    private static final int CONTACT_COLUMN_RAW_ID = 0;
+    private static final int CONTACT_COLUMN_CONTACT_ID = 1;
+    private static final int CONTACT_COLUMN_ACCOUNT_NAME = 2;
+    private static final int CONTACT_COLUMN_ACCOUNT_TYPE = 3;
+    private static final int CONTACT_COLUMN_DATA = 4;
+    private static final int CONTACT_COLUMN_DATA_TYPE = 5;
+    private static final int CONTACT_COLUMN_DATA_MIMETYPE = 6;
 
 
 
@@ -92,9 +98,8 @@ public class SimContactsOperation {
     public Uri insert(ContentValues values, int subscription) {
 
         Uri uri = getContentUri(subscription);
-        if (uri == null) {
+        if (uri == null)
             return null;
-        }
         String number = values.getAsString(SimContactsConstants.STR_NUMBER);
         String anrs = values.getAsString(SimContactsConstants.STR_ANRS);
         if (!TextUtils.isEmpty(anrs)) {
@@ -112,10 +117,10 @@ public class SimContactsOperation {
 
     public int update(ContentValues values,int subscription) {
         Uri uri = getContentUri(subscription);
-        if (uri == null) {
-            return -1;
-        }
-        int result;
+
+        int result = 0;
+        if (uri == null)
+            return result;
         String oldNumber = values.getAsString(SimContactsConstants.STR_NUMBER);
         String newNumber = values.getAsString(SimContactsConstants.STR_NEW_NUMBER);
         String oldAnrs = values.getAsString(SimContactsConstants.STR_ANRS);
@@ -137,7 +142,11 @@ public class SimContactsOperation {
     }
 
     public int delete(ContentValues values, int subscription) {
-        int result;
+        Uri uri = getContentUri(subscription);
+
+        int result = 0;
+        if (uri == null)
+            return result;
         StringBuilder buf = new StringBuilder();
         String num = null;
         String name = values.getAsString(SimContactsConstants.STR_TAG);
@@ -148,11 +157,8 @@ public class SimContactsOperation {
             num = PhoneNumberUtils.stripSeparators(number);
         if (anrs != null)
             anrs = anrs.replaceAll("[^0123456789PWN\\,\\;\\*\\#\\+\\:]", "");
-        Uri uri = getContentUri(subscription);
 
-        if (uri == null) {
-            return -1;
-        }
+
 
         if (!TextUtils.isEmpty(name)) {
             buf.append("tag='");
@@ -182,28 +188,33 @@ public class SimContactsOperation {
 
     private Uri getContentUri(int subscription) {
         Uri uri = null;
-        int[] subId = SubscriptionManager.getSubId(subscription);
+        SubscriptionManager sm = SubscriptionManager.from(mContext);
+        SubscriptionInfo subInfoRecord = null;
+        try {
+            subInfoRecord =  sm.getActiveSubscriptionInfoForSimSlotIndex(subscription);
+        } catch (SecurityException e) {
+            Log.w(TAG, "SecurityException thrown, lack permission for"
+                    + " getActiveSubscriptionInfoList", e);
+        }
 
-        if (subId != null && TelephonyManager.from(mContext).isMultiSimEnabled()) {
-            if (subId.length < 1 || subId[0] < 0) {
-                return null;
-            }
-            uri = Uri.parse(SimContactsConstants.SIM_SUB_URI + subId[0]);
-        } else {
-            uri = Uri.parse(SimContactsConstants.SIM_URI);
+        if (subInfoRecord != null) {
+            uri = Uri.parse(SimContactsConstants.SIM_SUB_URI
+                    + subInfoRecord.getSubscriptionId());
         }
         return uri;
     }
 
-    private static Cursor setupAccountCursor(long contactId) {
+    private static Cursor setupContactCursor(long contactId) {
         ContentResolver resolver = mContext.getContentResolver();
+        Uri contactUri = ContentUris.withAppendedId(Contacts.CONTENT_URI,
+                contactId);
+        Uri entityUri = Uri.withAppendedPath(contactUri,
+                Contacts.Entity.CONTENT_DIRECTORY);
 
         Cursor cursor = null;
         try {
-            cursor = resolver.query(RawContacts.CONTENT_URI,
-                    ACCOUNT_PROJECTION,
-                    RawContacts.CONTACT_ID + "="
-                    + Long.toString(contactId), null, null);
+            cursor = resolver.query(entityUri,
+                    CONTACT_PROJECTION, null, null, null);
         } catch (Exception e) {
             Log.e(TAG, e.getMessage());
         } finally {
@@ -220,47 +231,67 @@ public class SimContactsOperation {
 
     public static ContentValues getSimAccountValues(long contactId) {
         ContentValues mValues = new ContentValues();
-        Cursor cursor = setupAccountCursor(contactId);
-        if (cursor == null || cursor.getCount() == 0) {
+        Cursor cursor = setupContactCursor(contactId);
+        StringBuilder anr = new StringBuilder();
+        StringBuilder email = new StringBuilder();
+        if (cursor == null) {
             mValues.clear();
             return mValues;
         }
-        long rawContactId = cursor.getLong(cursor.getColumnIndex(RawContacts._ID));
-        String accountName = cursor.getString(cursor.getColumnIndex(RawContacts.ACCOUNT_NAME));
-        String accountType = cursor.getString(cursor.getColumnIndex(RawContacts.ACCOUNT_TYPE));
-        cursor.close();
-        if (SimContactsConstants.ACCOUNT_TYPE_SIM.equals(accountType)) {
-            mValues.clear();
-            String name = getContactItems(rawContactId,StructuredName.CONTENT_ITEM_TYPE,
-                     ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME);
-            mValues.put(SimContactsConstants.STR_TAG,name);
 
-            String number = getContactPhoneNumber(rawContactId,
-                Phone.CONTENT_ITEM_TYPE, String.valueOf(Phone.TYPE_MOBILE),
-                ContactsContract.CommonDataKinds.Phone.DATA);
-            mValues.put(SimContactsConstants.STR_NUMBER,number);
-
-            int sub = getSimSubscription(contactId);
-
-            if (MoreContactUtils.canSaveAnr(sub)) {
-                String anrs = getContactPhoneNumber(rawContactId,
-                        Phone.CONTENT_ITEM_TYPE, String.valueOf(Phone.TYPE_HOME),
-                        ContactsContract.CommonDataKinds.Phone.DATA);
-                mValues.put(SimContactsConstants.STR_ANRS, anrs);
+        try {
+            if (cursor.getCount() == 0 || !cursor.moveToFirst()) {
+                cursor.close();
+                return mValues;
             }
+            do {
+                String accountType = cursor
+                        .getString(CONTACT_COLUMN_ACCOUNT_TYPE);
+                String accountName = cursor.getString(CONTACT_COLUMN_ACCOUNT_NAME);
+                String mimeType = cursor
+                        .getString(CONTACT_COLUMN_DATA_MIMETYPE);
+                String data = cursor.getString(CONTACT_COLUMN_DATA);
+                String phoneType = cursor.getString(CONTACT_COLUMN_DATA_TYPE);
+                mValues.put(SimContactsConstants.ACCOUNT_TYPE, accountType);
+                mValues.put(SimContactsConstants.ACCOUNT_NAME, accountName);
+                if (TextUtils.isEmpty(data))
+                    continue;
+                if (SimContactsConstants.ACCOUNT_TYPE_SIM.equals(accountType)) {
+                    if (mimeType.equals(StructuredName.CONTENT_ITEM_TYPE)) {
+                        mValues.put(SimContactsConstants.STR_TAG, data);
+                    } else if (mimeType.equals(Phone.CONTENT_ITEM_TYPE)) {
+                        if (Integer.parseInt(phoneType) == Phone.TYPE_MOBILE) {
+                            mValues.put(SimContactsConstants.STR_NUMBER, data);
+                        } else {
+                            if (!TextUtils.isEmpty(anr.toString())) {
+                                anr.append(SimContactsConstants.ANR_SEP);
+                            }
+                            anr.append(data);
+                        }
+                    } else if (mimeType.equals(Email.CONTENT_ITEM_TYPE)) {
+                        if (!TextUtils.isEmpty(email.toString())) {
+                            email.append(SimContactsConstants.EMAIL_SEP);
+                        }
+                        email.append(data);
+                    }
+                }
+            } while (cursor.moveToNext());
 
-            if (MoreContactUtils.canSaveEmail(sub)) {
-                String emails = getContactItems(rawContactId,
-                        Email.CONTENT_ITEM_TYPE, ContactsContract.CommonDataKinds.Email.DATA);
-                mValues.put(SimContactsConstants.STR_EMAILS, emails);
-            }
-        }
+            if(!TextUtils.isEmpty(anr.toString()))
+                mValues.put(SimContactsConstants.STR_ANRS, anr.toString());
+            if (!TextUtils.isEmpty(email.toString()))
+                mValues.put(SimContactsConstants.STR_EMAILS, email.toString());
+        } catch (Exception e) {
+            Log.d(TAG, String.format("%s: %s", e.toString(), e.getMessage()));
+        } finally {
+            cursor.close();
+        } Log.d(TAG,"getSimAccountValue: " + mValues.toString());
         return mValues;
     }
 
     public static int getSimSubscription(long contactId) {
         int subscription = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-        Cursor cursor = setupAccountCursor(contactId);
+        Cursor cursor = setupContactCursor(contactId);
         if (cursor == null || cursor.getCount() == 0) {
             return subscription;
         }
@@ -268,6 +299,7 @@ public class SimContactsOperation {
         String accountName = cursor.getString(cursor.getColumnIndex(RawContacts.ACCOUNT_NAME));
         String accountType = cursor.getString(cursor.getColumnIndex(RawContacts.ACCOUNT_TYPE));
         if (accountType == null || accountName == null) {
+            cursor.close();
             return subscription;
         }
         if (SimContactsConstants.ACCOUNT_TYPE_SIM.equals(accountType)) {
@@ -275,84 +307,6 @@ public class SimContactsOperation {
         }
         cursor.close();
         return subscription;
-    }
-
-
-    private static String getContactItems(long rawContactId, String selectionArg,
-                                                String columnName) {
-        StringBuilder retval = new StringBuilder();
-        Uri baseUri = ContentUris.withAppendedId(RawContacts.CONTENT_URI, rawContactId);
-        Uri dataUri = Uri.withAppendedPath(baseUri, RawContacts.Data.CONTENT_DIRECTORY);
-
-        Cursor c = null;
-        try {
-            c = mContext.getContentResolver().query(dataUri, null,
-                    Data.MIMETYPE + "=?", new String[] {selectionArg}, null);
-            if (c == null || c.getCount() == 0) {
-                if(c != null) {
-                    c.close();
-                }
-                return null;
-            }
-            c.moveToPosition(-1);
-
-            while (c.moveToNext()) {
-                if (!TextUtils.isEmpty(retval.toString())) {
-                    retval.append(SimContactsConstants.EMAIL_SEP);
-                }
-                String value = c.getString(c.getColumnIndex(columnName));
-                if (!TextUtils.isEmpty(value)) {
-                    retval.append(value);
-                }
-            }
-
-        } catch (Exception e) {
-            Log.e(TAG, e.getMessage());
-        } finally {
-            if (c != null) {
-                c.close();
-            }
-        }
-
-        return retval.toString();
-    }
-
-    private static
-    String getContactPhoneNumber(long rawContactId, String selectionArg1,
-                            String selectionArg2, String columnName) {
-        StringBuilder retval = new StringBuilder();
-        Uri baseUri = ContentUris.withAppendedId(RawContacts.CONTENT_URI, rawContactId);
-        Uri dataUri = Uri.withAppendedPath(baseUri, RawContacts.Data.CONTENT_DIRECTORY);
-
-        Cursor c = null;
-        try {
-            c = mContext.getContentResolver().query(dataUri, null,
-                    Data.MIMETYPE + "=? AND " + Phone.TYPE + "=?",
-                    new String[] {selectionArg1,selectionArg2}, null);
-            if (c == null || c.getCount() == 0) {
-                if(c != null) {
-                    c.close();
-                }
-                return null;
-            }
-            c.moveToPosition(-1);
-
-            while (c.moveToNext()) {
-                if (!TextUtils.isEmpty(retval.toString())) {
-                    retval.append(SimContactsConstants.ANR_SEP);
-                }
-                retval.append(c.getString(c.getColumnIndex(columnName)));
-            }
-
-        } catch (Exception e) {
-            Log.e(TAG, e.getMessage());
-        } finally {
-            if (c != null) {
-                c.close();
-            }
-        }
-
-        return retval.toString();
     }
 
 }

@@ -31,16 +31,12 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.telephony.TelephonyManager;
-import android.util.Log;
 
 import com.android.contacts.common.MoreContactUtils;
 import com.android.contacts.common.model.account.SimAccountType;
 import com.android.contacts.common.R;
-import com.android.contacts.common.util.BitmapUtil;
 
 import junit.framework.Assert;
-
-import org.chinese.pinyin.PinyinHelper;
 
 /**
  * A drawable that encapsulates all the functionality needed to display a letter tile to
@@ -75,8 +71,6 @@ public class LetterTileDrawable extends Drawable {
     public static final int TYPE_VOICEMAIL = 3;
     public static final int TYPE_DEFAULT = TYPE_PERSON;
 
-    private String mDisplayName;
-    private String mIdentifier;
     private int mContactType = TYPE_DEFAULT;
     private float mScale = 1.0f;
     private float mOffset = 0.0f;
@@ -84,15 +78,14 @@ public class LetterTileDrawable extends Drawable {
     private Context mContext;
     private boolean mIsCircle = false;
 
+    private int mColor;
+    private Character mLetter = null;
 
-    public LetterTileDrawable(final Context context, final Resources res,
-            final Account account) {
-        mPaint = new Paint();
-        mPaint.setFilterBitmap(true);
-        mPaint.setDither(true);
-        mAccount = account;
-        mContext = context;
+    public LetterTileDrawable(final Resources res) {
+        this(res, null, null);
+    }
 
+    public LetterTileDrawable(final Resources res, final Context context, final Account account) {
         if (sColors == null) {
             sColors = res.obtainTypedArray(R.array.letter_tile_colors);
             sDefaultColor = res.getColor(R.color.letter_tile_default_color);
@@ -116,6 +109,12 @@ public class LetterTileDrawable extends Drawable {
             sPaint.setTextAlign(Align.CENTER);
             sPaint.setAntiAlias(true);
         }
+        mPaint = new Paint();
+        mPaint.setFilterBitmap(true);
+        mPaint.setDither(true);
+        mColor = sDefaultColor;
+        mAccount = account;
+        mContext = context;
     }
 
     @Override
@@ -153,7 +152,7 @@ public class LetterTileDrawable extends Drawable {
 
     private void drawLetterTile(final Canvas canvas) {
         // Draw background color.
-        sPaint.setColor(pickColor(mIdentifier));
+        sPaint.setColor(mColor);
 
         sPaint.setAlpha(mPaint.getAlpha());
         final Rect bounds = getBounds();
@@ -165,13 +164,12 @@ public class LetterTileDrawable extends Drawable {
             canvas.drawRect(bounds, sPaint);
         }
 
-        // Draw letter/digit only if the first character is an english letter
-        if (!TextUtils.isEmpty(mDisplayName)
-                && isEnglishLetter(mDisplayName.charAt(0))
-                && (mAccount == null || (mAccount != null && !mAccount.type
-                        .equals(SimAccountType.ACCOUNT_TYPE)))) {
+        // Draw letter/digit only if the first character is an english letter or there's a override
+
+        if (mLetter != null && (mAccount == null || (mAccount != null && !mAccount.type
+                .equals(SimAccountType.ACCOUNT_TYPE)))) {
             // Draw letter or digit.
-            sFirstChar[0] = Character.toUpperCase(mDisplayName.charAt(0));
+            sFirstChar[0] = mLetter;
 
             // Scale text by canvas bounds and user selected scaling factor
             sPaint.setTextSize(mScale * sLetterToTileRatio * minDimension);
@@ -182,34 +180,19 @@ public class LetterTileDrawable extends Drawable {
             // Draw the letter in the canvas, vertically shifted up or down by the user-defined
             // offset
             canvas.drawText(sFirstChar, 0, 1, bounds.centerX(),
-                    bounds.centerY() + mOffset * bounds.height() + sRect.height() / 2,
-                    sPaint);
-        } else if (mDisplayName != null && PinyinHelper.matchesCheck(mDisplayName.charAt(0))) {
-            // Draw letter/digit only if the first character is a chinese letter
-            // Draw letter or digit.
-            sFirstChar[0] = Character.toUpperCase(mDisplayName.charAt(0));
-
-            // Scale text by canvas bounds and user selected scaling factor
-            sPaint.setTextSize(mScale * sLetterToTileRatio * minDimension * 0.8f);
-            //sPaint.setTextSize(sTileLetterFontSize);
-            sPaint.getTextBounds(sFirstChar, 0, 1, sRect);
-            sPaint.setColor(sTileFontColor);
-
-            // Draw the letter in the canvas, vertically shifted up or down by the user-defined
-            // offset
-            canvas.drawText(sFirstChar, 0, 1, bounds.centerX(),
-                    bounds.centerY() * 0.9f + mOffset * bounds.height() + sRect.height() / 2,
+                    bounds.centerY() + mOffset * bounds.height() - sRect.exactCenterY(),
                     sPaint);
         } else {
             // Draw the default image if there is no letter/digit to be drawn
             final Bitmap bitmap = getBitmapForContactType(mContactType,
                     mAccount, mContext);
-            drawBitmap(bitmap, bitmap.getWidth(), bitmap.getHeight(), canvas);
+            drawBitmap(bitmap, bitmap.getWidth(), bitmap.getHeight(),
+                    canvas);
         }
     }
 
     public int getColor() {
-        return pickColor(mIdentifier);
+        return mColor;
     }
 
     /**
@@ -228,17 +211,23 @@ public class LetterTileDrawable extends Drawable {
 
     private static Bitmap getBitmapForContactType(int contactType,
             Account account, Context context) {
-        if (account != null && SimAccountType.ACCOUNT_TYPE.equals(account.type)) {
-            if (TelephonyManager.getDefault().isMultiSimEnabled()) {
-                final int sub = MoreContactUtils.getSubscription(
-                        SimAccountType.ACCOUNT_TYPE, account.name);
-                int index = MoreContactUtils.getCurrentSimIconIndex(context, sub);
-                if (index < 0) {
-                    return DEFAULT_PERSON_AVATAR;
+        if (context != null) {
+            TelephonyManager tm = (TelephonyManager) context
+                    .getSystemService(Context.TELEPHONY_SERVICE);
+            if (account != null
+                    && SimAccountType.ACCOUNT_TYPE.equals(account.type)) {
+                if (tm.getPhoneCount() > 1) {
+                    final int sub = MoreContactUtils.getSubscription(
+                            SimAccountType.ACCOUNT_TYPE, account.name);
+                    int index = MoreContactUtils.getCurrentSimIconIndex(
+                            context, sub);
+                    if (index < 0) {
+                        return DEFAULT_PERSON_AVATAR;
+                    }
+                    return DEFAULT_CUSTOMIZE_SIM_PERSON_AVATAR[index];
+                } else {
+                    return DEFAULT_SIM_PERSON_AVATAR;
                 }
-                return DEFAULT_CUSTOMIZE_SIM_PERSON_AVATAR[index];
-            } else {
-                return DEFAULT_SIM_PERSON_AVATAR;
             }
         }
         switch (contactType) {
@@ -278,8 +267,9 @@ public class LetterTileDrawable extends Drawable {
      * @param scale The ratio the letter tile should be scaled to as a percentage of its default
      * size, from a scale of 0 to 2.0f. The default is 1.0f.
      */
-    public void setScale(float scale) {
+    public LetterTileDrawable setScale(float scale) {
         mScale = scale;
+        return this;
     }
 
     /**
@@ -294,21 +284,41 @@ public class LetterTileDrawable extends Drawable {
      * at the bottom edge of the canvas.
      * The default is 0.0f.
      */
-    public void setOffset(float offset) {
+    public LetterTileDrawable setOffset(float offset) {
         Assert.assertTrue(offset >= -0.5f && offset <= 0.5f);
         mOffset = offset;
+        return this;
     }
 
-    public void setContactDetails(final String displayName, final String identifier) {
-        mDisplayName = displayName;
-        mIdentifier = identifier;
+    public LetterTileDrawable setLetter(Character letter){
+        mLetter = letter;
+        return this;
     }
 
-    public void setContactType(int contactType) {
+    public LetterTileDrawable setColor(int color){
+        mColor = color;
+        return this;
+    }
+
+    public LetterTileDrawable setLetterAndColorFromContactDetails(final String displayName,
+            final String identifier) {
+        if (displayName != null && displayName.length() > 0
+                && isEnglishLetter(displayName.charAt(0))) {
+            mLetter = Character.toUpperCase(displayName.charAt(0));
+        }else{
+            mLetter = null;
+        }
+        mColor = pickColor(identifier);
+        return this;
+    }
+
+    public LetterTileDrawable setContactType(int contactType) {
         mContactType = contactType;
+        return this;
     }
 
-    public void setIsCircular(boolean isCircle) {
+    public LetterTileDrawable setIsCircular(boolean isCircle) {
         mIsCircle = isCircle;
+        return this;
     }
 }

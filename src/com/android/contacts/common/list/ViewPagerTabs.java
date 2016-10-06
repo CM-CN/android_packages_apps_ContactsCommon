@@ -21,13 +21,12 @@ import android.content.res.TypedArray;
 import android.graphics.Outline;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.ViewPager;
-import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewOutlineProvider;
-import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -35,8 +34,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.contacts.common.R;
-
-import java.util.Locale;
+import com.android.contacts.common.compat.CompatUtils;
 
 /**
  * Lightweight implementation of ViewPager tabs. This looks similar to traditional actionBar tabs,
@@ -48,9 +46,6 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
 
     ViewPager mPager;
     private ViewPagerTabStrip mTabStrip;
-    // Keep track if scrolling to the target tab should be performed after the View has been
-    // rendered (so View.getWidth() returns valid values)
-    ViewTreeObserver mTabLayoutObserver;
 
     /**
      * Linearlayout that will contain the TextViews serving as tabs. This is the only child
@@ -64,14 +59,22 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
     int mSidePadding;
 
     private int[] mTabIcons;
+    // For displaying the unread count next to the tab icon.
+    private int[] mUnreadCounts;
 
-    private static final ViewOutlineProvider VIEW_BOUNDS_OUTLINE_PROVIDER =
-            new ViewOutlineProvider() {
-        @Override
-        public void getOutline(View view, Outline outline) {
-            outline.setRect(0, 0, view.getWidth(), view.getHeight());
+    private static final ViewOutlineProvider VIEW_BOUNDS_OUTLINE_PROVIDER;
+    static {
+        if (CompatUtils.isLollipopCompatible()) {
+            VIEW_BOUNDS_OUTLINE_PROVIDER = new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRect(0, 0, view.getWidth(), view.getHeight());
+                }
+            };
+        } else {
+            VIEW_BOUNDS_OUTLINE_PROVIDER = null;
         }
-    };
+    }
 
     private static final int TAB_SIDE_PADDING_IN_DPS = 10;
 
@@ -140,8 +143,10 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
                 new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
         a.recycle();
 
-        // enable shadow casting from view bounds
-        setOutlineProvider(VIEW_BOUNDS_OUTLINE_PROVIDER);
+        if (CompatUtils.isLollipopCompatible()) {
+            // enable shadow casting from view bounds
+            setOutlineProvider(VIEW_BOUNDS_OUTLINE_PROVIDER);
+        }
     }
 
     public void setViewPager(ViewPager viewPager) {
@@ -149,8 +154,22 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
         addTabs(mPager.getAdapter());
     }
 
-    public void setTabIcons(int [] tabIcons) {
+    /**
+     * Set the tab icons and initialize an array for unread counts the same length as the icon
+     * array.
+     *
+     * @param tabIcons An array representing the tab icons in order.
+     */
+    public void configureTabIcons(int[] tabIcons) {
         mTabIcons = tabIcons;
+        mUnreadCounts = new int[tabIcons.length];
+    }
+
+    public void setUnreadCount(int count, int position) {
+        if (mUnreadCounts == null || position >= mUnreadCounts.length) {
+            return;
+        }
+        mUnreadCounts[position] = count;
     }
 
     private void addTabs(PagerAdapter adapter) {
@@ -165,11 +184,25 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
     private void addTab(CharSequence tabTitle, final int position) {
         View tabView;
         if (mTabIcons != null && position < mTabIcons.length) {
-            View iconView = new View(getContext());
+            View layout = LayoutInflater.from(getContext()).inflate(
+                    R.layout.unread_count_tab, null);
+            View iconView = layout.findViewById(R.id.icon);
             iconView.setBackgroundResource(mTabIcons[position]);
             iconView.setContentDescription(tabTitle);
-
-            tabView = iconView;
+            TextView textView = (TextView) layout.findViewById(R.id.count);
+            if (mUnreadCounts != null && mUnreadCounts[position] > 0) {
+                textView.setText(Integer.toString(mUnreadCounts[position]));
+                textView.setVisibility(View.VISIBLE);
+                iconView.setContentDescription(getResources().getQuantityString(
+                        R.plurals.tab_title_with_unread_items,
+                        mUnreadCounts[position],
+                        tabTitle.toString(),
+                        mUnreadCounts[position]));
+            } else {
+                textView.setVisibility(View.INVISIBLE);
+                iconView.setContentDescription(tabTitle);
+            }
+            tabView = layout;
         } else {
             final TextView textView = new TextView(getContext());
             textView.setText(tabTitle);
@@ -201,13 +234,39 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
         tabView.setOnLongClickListener(new OnTabLongClickListener(position));
 
         tabView.setPadding(mSidePadding, 0, mSidePadding, 0);
-        mTabStrip.addView(tabView, new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT,
-                LayoutParams.MATCH_PARENT, 1));
+
+        mTabStrip.addView(tabView, position, new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT, 1));
 
         // Default to the first child being selected
         if (position == 0) {
             mPrevSelected = 0;
             tabView.setSelected(true);
+        }
+    }
+
+    /**
+     * Remove a tab at a certain index.
+     *
+     * @param index The index of the tab view we wish to remove.
+     */
+    public void removeTab(int index) {
+        View view = mTabStrip.getChildAt(index);
+        if (view != null) {
+            mTabStrip.removeView(view);
+        }
+    }
+
+    /**
+     * Refresh a tab at a certain index by removing it and reconstructing it.
+     *
+     * @param index The index of the tab view we wish to update.
+     */
+    public void updateTab(int index) {
+        removeTab(index);
+
+        if (index < mPager.getAdapter().getCount()) {
+            addTab(mPager.getAdapter().getPageTitle(index), index);
         }
     }
 
@@ -237,29 +296,9 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
         selectedChild.setSelected(true);
 
         // Update scroll position
-        mPrevSelected = position;
-        if (selectedChild.getWidth() == 0) {
-            // this View is not laid out yet, defer scroll calculation
-            mTabLayoutObserver = selectedChild.getViewTreeObserver();
-            mTabLayoutObserver.addOnGlobalLayoutListener(new ViewTreeObserver
-                    .OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    if (mTabLayoutObserver != null && mTabLayoutObserver.isAlive()) {
-                        performScroll();
-                        mTabLayoutObserver.removeOnGlobalLayoutListener(this);
-                    }
-                }
-            });
-        } else {
-            performScroll();
-        }
-    }
-
-    public void performScroll() {
-        final View selectedChild = mTabStrip.getChildAt(mPrevSelected);
         final int scrollPos = selectedChild.getLeft() - (getWidth() - selectedChild.getWidth()) / 2;
         smoothScrollTo(scrollPos, 0);
+        mPrevSelected = position;
     }
 
     @Override
@@ -267,19 +306,10 @@ public class ViewPagerTabs extends HorizontalScrollView implements ViewPager.OnP
     }
 
     private int getRtlPosition(int position) {
-        boolean isRtl;
-        // This function may be called before this View is attached to a parent. During this
-        // window in time, View.getLayoutDirection() may not return the right layout direction so
-        // this check is needed
-        if (canResolveLayoutDirection()) {
-            isRtl = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-        } else {
-            // cannot resolve layout direction from view (usually during on configuration change),
-            // fall back to using locale
-            final Locale locale = Locale.getDefault();
-            isRtl = TextUtils.getLayoutDirectionFromLocale(locale) == View.LAYOUT_DIRECTION_RTL;
+        if (getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) {
+            return mTabStrip.getChildCount() - 1 - position;
         }
-        return isRtl ? (mTabStrip.getChildCount() - 1 - position) : position;
+        return position;
     }
 }
 
