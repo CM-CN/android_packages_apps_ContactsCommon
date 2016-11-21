@@ -28,13 +28,17 @@ import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Directory;
 import android.provider.ContactsContract.RawContacts;
 import android.provider.ContactsContract.SearchSnippets;
+import android.support.annotation.VisibleForTesting;
 import android.text.TextUtils;
 import android.view.View;
 
 import com.android.contacts.common.model.account.SimAccountType;
+import com.android.contacts.common.Experiments;
+import com.android.contacts.common.compat.ContactsCompat;
 import com.android.contacts.common.preference.ContactsPreferences;
-import com.android.contacts.common.MoreContactUtils;
+import com.android.contacts.commonbind.experiments.Flags;
 import com.android.contacts.common.SimContactsConstants;
+import com.android.contacts.common.MoreContactUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,9 +50,39 @@ public class DefaultContactListAdapter extends ContactListAdapter {
 
     public static final char SNIPPET_START_MATCH = '[';
     public static final char SNIPPET_END_MATCH = ']';
+    private Context mContext;
+
+    // Contacts contacted within the last 3 days (in seconds)
+    private static final long LAST_TIME_USED_3_DAYS_SEC = 3L * 24 * 60 * 60;
+
+    // Contacts contacted within the last 7 days (in seconds)
+    private static final long LAST_TIME_USED_7_DAYS_SEC = 7L * 24 * 60 * 60;
+
+    // Contacts contacted within the last 14 days (in seconds)
+    private static final long LAST_TIME_USED_14_DAYS_SEC = 14L * 24 * 60 * 60;
+
+    // Contacts contacted within the last 30 days (in seconds)
+    private static final long LAST_TIME_USED_30_DAYS_SEC = 30L * 24 * 60 * 60;
+
+    private static final String TIME_SINCE_LAST_USED_SEC =
+            "(strftime('%s', 'now') - " + Contacts.LAST_TIME_CONTACTED + "/1000)";
+
+    private static final String STREQUENT_SORT =
+            "(CASE WHEN " + TIME_SINCE_LAST_USED_SEC + " < " + LAST_TIME_USED_3_DAYS_SEC +
+                    " THEN 0 " +
+                    " WHEN " + TIME_SINCE_LAST_USED_SEC + " < " + LAST_TIME_USED_7_DAYS_SEC +
+                    " THEN 1 " +
+                    " WHEN " + TIME_SINCE_LAST_USED_SEC + " < " + LAST_TIME_USED_14_DAYS_SEC +
+                    " THEN 2 " +
+                    " WHEN " + TIME_SINCE_LAST_USED_SEC + " < " + LAST_TIME_USED_30_DAYS_SEC +
+                    " THEN 3 " +
+                    " ELSE 4 END), " +
+                    Contacts.TIMES_CONTACTED + " DESC, " +
+                    Contacts.STARRED + " DESC";
 
     public DefaultContactListAdapter(Context context) {
         super(context);
+        mContext = context;
     }
 
     /** append Uri QueryParameter to filter contacts in SIM card */
@@ -72,12 +106,11 @@ public class DefaultContactListAdapter extends ContactListAdapter {
             ((ProfileAndContactsLoader) loader).setLoadProfile(shouldIncludeProfile());
         }
 
-        ContactListFilter filter = getFilter();
+        String sortOrder = null;
         if (isSearchMode()) {
+            final Flags flags = Flags.getInstance(mContext);
             String query = getQueryString();
-            if (query == null) {
-                query = "";
-            }
+            if (query == null) query = "";
             query = query.trim();
             if (TextUtils.isEmpty(query)) {
                 // Regardless of the directory, we don't want anything returned,
@@ -86,47 +119,53 @@ public class DefaultContactListAdapter extends ContactListAdapter {
                 loader.setProjection(getProjection(false));
                 loader.setSelection("0");
             } else {
-                Builder builder = Contacts.CONTENT_FILTER_URI.buildUpon();
-                builder.appendPath(query);      // Builder will encode the query
-                builder.appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY,
-                        String.valueOf(directoryId));
-                if (directoryId != Directory.DEFAULT && directoryId != Directory.LOCAL_INVISIBLE) {
-                    builder.appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY,
-                            String.valueOf(getDirectoryResultLimit(getDirectoryById(directoryId))));
-                }
-                builder.appendQueryParameter(SearchSnippets.DEFERRED_SNIPPETING_KEY,"1");
+                final Builder builder = ContactsCompat.getContentUri().buildUpon();
+                appendSearchParameters(builder, query, directoryId);
                 loader.setUri(builder.build());
                 loader.setProjection(getProjection(true));
-            }
-            boolean isAirMode = MoreContactUtils.isAPMOnAndSIMPowerDown(getContext());
-
-            if (isAirMode
-                    || (null != filter && filter.filterType ==
-                        ContactListFilter.FILTER_TYPE_ALL_WITHOUT_SIM)) {
-                appendUriQueryParameterWithoutSim(loader,
-                        RawContacts.ACCOUNT_TYPE, SimAccountType.ACCOUNT_TYPE);
-            } else {
-                // Do not show contacts when SIM card is disabled
-                String disabledSimFilter = MoreContactUtils.getDisabledSimFilter();
-                if (!TextUtils.isEmpty(disabledSimFilter)) {
-                    appendUriQueryParameterWithoutSim(
-                            loader, RawContacts.ACCOUNT_NAME, disabledSimFilter);
+                if (flags.getBoolean(Experiments.FLAG_SEARCH_STREQUENTS_FIRST, false)) {
+                    sortOrder = STREQUENT_SORT;
                 }
             }
+            final ContactListFilter filter = getFilter();
+
+            if (null != filter
+                    && filter.filterType == ContactListFilter.FILTER_TYPE_ALL_WITHOUT_SIM) {
+                appendUriQueryParameterWithoutSim(loader,
+                        RawContacts.ACCOUNT_TYPE, SimAccountType.ACCOUNT_TYPE);
+            }
         } else {
+            final ContactListFilter filter = getFilter();
             configureUri(loader, directoryId, filter);
             loader.setProjection(getProjection(false));
             configureSelection(loader, directoryId, filter);
         }
 
-        String sortOrder;
         if (getSortOrder() == ContactsPreferences.SORT_ORDER_PRIMARY) {
-            sortOrder = Contacts.SORT_KEY_PRIMARY;
+            if (sortOrder == null) {
+                sortOrder = Contacts.SORT_KEY_PRIMARY;
+            } else {
+                sortOrder += ", " + Contacts.SORT_KEY_PRIMARY;
+            }
         } else {
-            sortOrder = Contacts.SORT_KEY_ALTERNATIVE;
+            if (sortOrder == null) {
+                sortOrder = Contacts.SORT_KEY_ALTERNATIVE;
+            } else {
+                sortOrder += ", " + Contacts.SORT_KEY_ALTERNATIVE;
+            }
         }
-
         loader.setSortOrder(sortOrder);
+    }
+
+    private void appendSearchParameters(Builder builder, String query, long directoryId) {
+        builder.appendPath(query); // Builder will encode the query
+        builder.appendQueryParameter(ContactsContract.DIRECTORY_PARAM_KEY,
+                String.valueOf(directoryId));
+        if (directoryId != Directory.DEFAULT && directoryId != Directory.LOCAL_INVISIBLE) {
+            builder.appendQueryParameter(ContactsContract.LIMIT_PARAM_KEY,
+                    String.valueOf(getDirectoryResultLimit(getDirectoryById(directoryId))));
+        }
+        builder.appendQueryParameter(SearchSnippets.DEFERRED_SNIPPETING_KEY, "1");
     }
 
     protected void configureUri(CursorLoader loader, long directoryId, ContactListFilter filter) {
@@ -173,21 +212,10 @@ public class DefaultContactListAdapter extends ContactListAdapter {
         StringBuilder selection = new StringBuilder();
         List<String> selectionArgs = new ArrayList<String>();
 
-        boolean isAirMode = MoreContactUtils.isAPMOnAndSIMPowerDown(getContext());
-        String disabledSimFilter = MoreContactUtils.getDisabledSimFilter();
-
         switch (filter.filterType) {
             case ContactListFilter.FILTER_TYPE_ALL_ACCOUNTS: {
                 // We have already added directory=0 to the URI, which takes care of this
                 // filter
-                // Do not show contacts in SIM card when airplane mode is on
-                if (isAirMode) {
-                    appendUriQueryParameterWithoutSim(loader, RawContacts.ACCOUNT_TYPE,
-                            SimAccountType.ACCOUNT_TYPE);
-                } else if (!TextUtils.isEmpty(disabledSimFilter)) {
-                    appendUriQueryParameterWithoutSim(loader, RawContacts.ACCOUNT_NAME,
-                            disabledSimFilter);
-                }
                 break;
             }
             case ContactListFilter.FILTER_TYPE_SINGLE_CONTACT: {
@@ -209,13 +237,6 @@ public class DefaultContactListAdapter extends ContactListAdapter {
                     selection.append(" AND " + Contacts.HAS_PHONE_NUMBER + "=1");
                 }
                 // Do not show contacts in SIM card when airplane mode is on
-                if (isAirMode) {
-                    appendUriQueryParameterWithoutSim(loader, RawContacts.ACCOUNT_TYPE,
-                            SimAccountType.ACCOUNT_TYPE);
-                } else if (!TextUtils.isEmpty(disabledSimFilter)) {
-                    appendUriQueryParameterWithoutSim(loader, RawContacts.ACCOUNT_NAME,
-                            disabledSimFilter);
-                }
                 break;
             }
             case ContactListFilter.FILTER_TYPE_ACCOUNT: {
@@ -225,6 +246,14 @@ public class DefaultContactListAdapter extends ContactListAdapter {
             case ContactListFilter.FILTER_TYPE_ALL_WITHOUT_SIM: {
                 appendUriQueryParameterWithoutSim(loader, RawContacts.ACCOUNT_TYPE,
                      SimAccountType.ACCOUNT_TYPE);
+                break;
+            }
+            case ContactListFilter.FILTER_TYPE_CAN_SAVE_EMAIL: {
+                String emailFilter = MoreContactUtils.getSimFilter(mContext);
+                if (!TextUtils.isEmpty(emailFilter)) {
+                    appendUriQueryParameterWithoutSim(
+                            loader, RawContacts.ACCOUNT_NAME, emailFilter);
+                }
                 break;
             }
         }

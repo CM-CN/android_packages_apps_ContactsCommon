@@ -17,6 +17,7 @@
 package com.android.contacts.common.list;
 
 import android.content.Context;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.View;
@@ -28,8 +29,6 @@ import android.widget.TextView;
 import com.android.contacts.common.R;
 import com.android.contacts.common.model.AccountTypeManager;
 import com.android.contacts.common.model.account.AccountType;
-import com.android.contacts.common.model.account.PhoneAccountType;
-import com.android.contacts.common.model.account.SimAccountType;
 
 /**
  * Contact list filter parameters.
@@ -76,6 +75,11 @@ public class ContactListFilterView extends LinearLayout {
             // properly if the button hasn't been initialized.
             Log.wtf(TAG, "radio-button cannot be activated because it is null");
         }
+        setContentDescription(generateContentDescription());
+    }
+
+    public boolean isChecked() {
+        return mRadioButton.isChecked();
     }
 
     public void bindView(AccountTypeManager accountTypes) {
@@ -115,13 +119,7 @@ public class ContactListFilterView extends LinearLayout {
                 break;
             }
             case ContactListFilter.FILTER_TYPE_ACCOUNT: {
-                if (SimAccountType.ACCOUNT_TYPE.equals(mFilter.accountType)
-                    || PhoneAccountType.ACCOUNT_TYPE
-                            .equals(mFilter.accountType)) {
-                    mAccountUserName.setVisibility(View.GONE);
-                } else {
-                    mAccountUserName.setVisibility(View.VISIBLE);
-                }
+                mAccountUserName.setVisibility(View.VISIBLE);
                 mIcon.setVisibility(View.VISIBLE);
                 if (mFilter.icon != null) {
                     mIcon.setImageDrawable(mFilter.icon);
@@ -131,10 +129,11 @@ public class ContactListFilterView extends LinearLayout {
                 final AccountType accountType =
                         accountTypes.getAccountType(mFilter.accountType, mFilter.dataSet);
                 mAccountUserName.setText(mFilter.accountName);
-                mAccountType.setText(accountType.getDisplayLabel(getContext(),mFilter.accountName));
+                mAccountType.setText(accountType.getDisplayLabel(getContext()));
                 break;
             }
         }
+        setContentDescription(generateContentDescription());
     }
 
     private void bindView(int iconResource, int textResource) {
@@ -146,5 +145,20 @@ public class ContactListFilterView extends LinearLayout {
         }
 
         mAccountType.setText(textResource);
+    }
+
+    String generateContentDescription() {
+        final StringBuilder sb = new StringBuilder();
+        if (!TextUtils.isEmpty(mAccountType.getText())) {
+            sb.append(mAccountType.getText());
+        }
+        if (!TextUtils.isEmpty(mAccountUserName.getText())) {
+            if (sb.length() > 0) {
+                sb.append(" ");
+            }
+            sb.append(mAccountUserName.getText());
+        }
+        return getContext().getString(isActivated() ? R.string.account_filter_view_checked :
+                R.string.account_filter_view_not_checked, sb.toString());
     }
 }

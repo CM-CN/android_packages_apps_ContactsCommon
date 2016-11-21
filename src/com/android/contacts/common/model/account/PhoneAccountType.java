@@ -47,7 +47,6 @@ import com.android.contacts.common.model.account.AccountType.DefinitionException
 public class PhoneAccountType extends BaseAccountType{
     private static final String TAG = "PhoneAccountType";
 
-    public static final String ACCOUNT_NAME = SimContactsConstants.PHONE_NAME;
     public static final String ACCOUNT_TYPE = SimContactsConstants.ACCOUNT_TYPE_PHONE;
     public static final int FLAGS_PERSON_NAME = EditorInfo.TYPE_CLASS_TEXT
             | EditorInfo.TYPE_TEXT_FLAG_CAP_WORDS | EditorInfo.TYPE_TEXT_VARIATION_PERSON_NAME;
@@ -55,7 +54,7 @@ public class PhoneAccountType extends BaseAccountType{
 
     public PhoneAccountType(Context context, String resPackageName) {
         this.accountType = ACCOUNT_TYPE;
-        this.resourcePackageName = null;
+        this.resourcePackageName = resPackageName;
         this.syncAdapterPackageName = resPackageName;
 
         try {
@@ -73,10 +72,6 @@ public class PhoneAccountType extends BaseAccountType{
             addDataKindNote(context);
             addDataKindWebsite(context);
             addDataKindGroupMembership(context);
-            if (context.getResources().getBoolean(
-                    com.android.internal.R.bool.config_built_in_sip_phone)) {
-                addDataKindSipAddress(context);
-            }
 
             mIsInitialized = true;
         } catch (DefinitionException e) {

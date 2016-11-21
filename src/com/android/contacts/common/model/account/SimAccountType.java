@@ -41,7 +41,7 @@ import com.android.contacts.common.R;
 import com.android.contacts.common.SimContactsConstants;
 import com.android.contacts.common.model.account.AccountType.DefinitionException;
 import com.android.contacts.common.model.dataitem.DataKind;
-import com.google.android.collect.Lists;
+import com.google.common.collect.Lists;
 
 public class SimAccountType extends BaseAccountType{
     private static final String TAG = "SimContactsType";
@@ -66,6 +66,7 @@ public class SimAccountType extends BaseAccountType{
             addDataKindDisplayName(context);
             addDataKindPhone(context);
             addDataKindEmail(context);
+            addDataKindPhoto(context);
             mIsInitialized = true;
         } catch (DefinitionException e) {
             Log.e(TAG, "Problem building account type", e);
@@ -102,6 +103,7 @@ public class SimAccountType extends BaseAccountType{
 
         kind.typeOverallMax = 1;
         kind.typeColumn = Email.TYPE;
+        kind.typeList = Lists.newArrayList();;
         kind.fieldList = Lists.newArrayList();
         kind.fieldList.add(new EditField(Email.ADDRESS, R.string.emailLabelsGroup, FLAGS_EMAIL));
         return kind;

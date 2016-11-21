@@ -29,13 +29,14 @@
  */
 package com.android.contacts.common;
 
-import android.telephony.SubscriptionManager;
-import com.android.internal.telephony.PhoneConstants;
 
 public interface SimContactsConstants {
 
     public static final String SIM_NAME_1 = "SIM1";
     public static final String SIM_NAME_2 = "SIM2";
+    public static final int SLOT1 = 0;
+    public static final int SLOT2 = 1;
+    public static final String SLOT_KEY = "slot";
     public static final String SIM_NAME = "SIM";
     public static final String PHONE_NAME = "PHONE";
     public static final String ACCOUNT_TYPE_SIM = "com.android.sim";
@@ -60,6 +61,8 @@ public interface SimContactsConstants {
     public static final String WITHOUT_SIM_FLAG ="no_sim";
     public static final String IS_CONTACT = "is_contact";
     public static final String RESULT_KEY = "result";
+    public static final String RESULT_KEY_ONLY_NUMBER = "result_only_number";
+    public static final String MODE = "mode";
     public static final String ACTION_MULTI_PICK =
             "com.android.contacts.action.MULTI_PICK";
     public static final String ACTION_MULTI_PICK_EMAIL =
@@ -68,9 +71,6 @@ public interface SimContactsConstants {
             "com.android.contacts.action.MULTI_PICK_CALL";
     public static final String ACTION_MULTI_PICK_SIM =
             "com.android.contacts.action.MULTI_PICK_SIM";
-    public static final String SUB = PhoneConstants.SLOT_KEY;
-
-    public static final int SUB_1 = PhoneConstants.SUB1;
-    public static final int SUB_2 = PhoneConstants.SUB2;
-    public static final int SUB_INVALID = SubscriptionManager.INVALID_SIM_SLOT_INDEX;
 }
+
+

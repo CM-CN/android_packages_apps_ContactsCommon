@@ -16,12 +16,10 @@
 package com.android.contacts.common.util;
 
 import android.content.Context;
-import android.location.Geocoder;
 import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.Log;
 
-import com.android.contacts.common.GeoUtil;
 import com.google.i18n.phonenumbers.NumberParseException;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
@@ -53,101 +51,6 @@ public class PhoneNumberHelper {
         // the passed-in string is URI-escaped.  (Neither "@" nor "%40"
         // will ever be found in a legal PSTN number.)
         return number != null && (number.contains("@") || number.contains("%40"));
-    }
-
-    /**
-     * Formats the phone number only if the given number hasn't been formatted.
-     * <p>
-     * The number which has only dailable character is treated as not being
-     * formatted.
-     *
-     * @param phoneNumber the number to be formatted.
-     * @param phoneNumberE164 The E164 format number whose country code is used if the given
-     * phoneNumber doesn't have the country code.
-     * @param defaultCountryIso The ISO 3166-1 two letters country code whose convention will
-     * be used if the phoneNumberE164 is null or invalid, or if phoneNumber contains IDD.
-     * @return The formatted number if the given number has been formatted, otherwise, return the
-     * given number.
-     *
-     * TODO: Remove if PhoneNumberUtils.formatNumber(String phoneNumber, String phoneNumberE164,
-     * String defaultCountryIso) is made public.
-     */
-    public static String formatNumber(
-            String phoneNumber, String phoneNumberE164, String defaultCountryIso) {
-        int len = phoneNumber.length();
-        for (int i = 0; i < len; i++) {
-            if (!PhoneNumberUtils.isDialable(phoneNumber.charAt(i))) {
-                return phoneNumber;
-            }
-        }
-        PhoneNumberUtil util = PhoneNumberUtil.getInstance();
-        // Get the country code from phoneNumberE164
-        if (phoneNumberE164 != null && phoneNumberE164.length() >= 2
-                && phoneNumberE164.charAt(0) == '+') {
-            try {
-                // The number to be parsed is in E164 format, so the default region used doesn't
-                // matter.
-                PhoneNumber pn = util.parse(phoneNumberE164, "ZZ");
-                String regionCode = util.getRegionCodeForNumber(pn);
-                if (!TextUtils.isEmpty(regionCode) &&
-                        // This makes sure phoneNumber doesn't contain an IDD
-                        normalizeNumber(phoneNumber).indexOf(phoneNumberE164.substring(1)) <= 0) {
-                    defaultCountryIso = regionCode;
-                }
-            } catch (NumberParseException e) {
-                Log.w(LOG_TAG, "The number could not be parsed in E164 format!");
-            }
-        }
-
-        String result = formatNumber(phoneNumber, defaultCountryIso);
-        return result == null ? phoneNumber : result;
-    }
-
-    /**
-     * Format a phone number.
-     * <p>
-     * If the given number doesn't have the country code, the phone will be
-     * formatted to the default country's convention.
-     *
-     * @param phoneNumber The number to be formatted.
-     * @param defaultCountryIso The ISO 3166-1 two letters country code whose convention will
-     * be used if the given number doesn't have the country code.
-     * @return The formatted number, or null if the given number is not valid.
-     *
-     * TODO: Remove if PhoneNumberUtils.formatNumber(String phoneNumber, String defaultCountryIso)
-     * is made public.
-     */
-    public static String formatNumber(String phoneNumber, String defaultCountryIso) {
-        // Do not attempt to format numbers that start with a hash or star symbol.
-        if (phoneNumber.startsWith("#") || phoneNumber.startsWith("*")) {
-            return phoneNumber;
-        }
-
-        final PhoneNumberUtil util = PhoneNumberUtil.getInstance();
-        String result = null;
-        try {
-            PhoneNumber pn = util.parseAndKeepRawInput(phoneNumber, defaultCountryIso);
-            /**
-             * Need to reformat any local Korean phone numbers (when the user is in Korea) with
-             * country code to corresponding national format which would replace the leading
-             * +82 with 0.
-             */
-            if (KOREA_ISO_COUNTRY_CODE.equals(defaultCountryIso) &&
-                    (pn.getCountryCode() == util.getCountryCodeForRegion(KOREA_ISO_COUNTRY_CODE)) &&
-                    (pn.getCountryCodeSource() ==
-                            PhoneNumber.CountryCodeSource.FROM_NUMBER_WITH_PLUS_SIGN)) {
-                result = util.format(pn, PhoneNumberUtil.PhoneNumberFormat.NATIONAL);
-            } else {
-                result = util.formatInOriginalFormat(pn, defaultCountryIso);
-            }
-        } catch (NumberParseException e) {
-            Log.w(LOG_TAG, "Number could not be parsed with the given country code!");
-        }
-        return result;
-    }
-
-    public static String formatPhoneNumber(Context context, String phoneNumber) {
-        return formatNumber(phoneNumber, GeoUtil.getCurrentCountryIso(context));
     }
 
     /**
@@ -200,31 +103,5 @@ public class PhoneNumberHelper {
             return number;
         }
         return number.substring(0, delimiterIndex);
-    }
-
-    /**
-     * Determine whether a phone number matches a valid phone number pattern for a specified region.
-     *
-     * @param context application context
-     * @param phoneNumber The number to be formatted.
-     * @param defaultCountryIso The ISO 3166-1 two letters country code whose convention will
-     * be used if the given number doesn't have the country code.
-     * @return boolean representing whether valid phone number or not.
-     */
-    public static boolean isValidNumber(Context context, String phoneNumber,
-            String defaultCountryIso) {
-        final String iso = TextUtils.isEmpty(defaultCountryIso) ?
-                GeoUtil.getCurrentCountryIso(context) : defaultCountryIso;
-        final PhoneNumberUtil util = PhoneNumberUtil.getInstance();
-        boolean result = false;
-
-        try {
-            PhoneNumber pn = util.parseAndKeepRawInput(phoneNumber, iso);
-            result = util.isValidNumber(pn);
-        } catch (NumberParseException e) {
-            Log.w(LOG_TAG, "Number could not be parsed with the given country code!", e);
-        }
-
-        return result;
     }
 }

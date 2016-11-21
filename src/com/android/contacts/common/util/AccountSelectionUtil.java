@@ -30,15 +30,15 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import com.android.contacts.common.R;
-import com.android.contacts.common.SimContactsConstants;
 import com.android.contacts.common.model.AccountTypeManager;
 import com.android.contacts.common.model.account.AccountType;
 import com.android.contacts.common.model.account.AccountWithDataSet;
 import com.android.contacts.common.vcard.ImportVCardActivity;
-import com.android.internal.telephony.PhoneConstants;
+import com.android.contacts.common.SimContactsConstants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -85,7 +85,7 @@ public class AccountSelectionUtil {
 
         public void onClick(DialogInterface dialog, int which) {
             dialog.dismiss();
-            doImport(mContext, mResId, mAccountList.get(which));
+            doImport(mContext, mResId, mAccountList.get(which), mSubscriptionId);
         }
         /**
          * Reset the account list for this listener, to make sure the selected
@@ -126,7 +126,7 @@ public class AccountSelectionUtil {
             DialogInterface.OnClickListener onClickListener,
             DialogInterface.OnCancelListener onCancelListener, boolean includeSIM) {
         final AccountTypeManager accountTypes = AccountTypeManager.getInstance(context);
-        List<AccountWithDataSet> writableAccountList;
+        List<AccountWithDataSet> writableAccountList = accountTypes.getAccounts(true);
         if (includeSIM) {
             writableAccountList = accountTypes.getAccounts(true);
         } else {
@@ -144,30 +144,28 @@ public class AccountSelectionUtil {
         final LayoutInflater dialogInflater = (LayoutInflater)dialogContext
                 .getSystemService(Context.LAYOUT_INFLATER_SERVICE);
         final ArrayAdapter<AccountWithDataSet> accountAdapter =
-            new ArrayAdapter<AccountWithDataSet>(context, android.R.layout.simple_list_item_2,
-                    writableAccountList) {
-
+            new ArrayAdapter<AccountWithDataSet>(
+                    context, R.layout.account_selector_list_item_condensed, writableAccountList) {
             @Override
             public View getView(int position, View convertView, ViewGroup parent) {
                 if (convertView == null) {
                     convertView = dialogInflater.inflate(
-                            android.R.layout.simple_list_item_2,
+                            R.layout.account_selector_list_item_condensed,
                             parent, false);
                 }
 
-                // TODO: show icon along with title
-                final TextView text1 =
-                        (TextView)convertView.findViewById(android.R.id.text1);
-                final TextView text2 =
-                        (TextView)convertView.findViewById(android.R.id.text2);
+                final TextView text1 = (TextView) convertView.findViewById(android.R.id.text1);
+                final TextView text2 = (TextView) convertView.findViewById(android.R.id.text2);
+                final ImageView icon = (ImageView) convertView.findViewById(android.R.id.icon);
 
                 final AccountWithDataSet account = this.getItem(position);
                 final AccountType accountType = accountTypes.getAccountType(
                         account.type, account.dataSet);
                 final Context context = getContext();
 
-                text1.setText(account.name);
-                text2.setText(accountType.getDisplayLabel(context));
+                text1.setText(accountType.getDisplayLabel(context));
+                text2.setText(account.name);
+                icon.setImageDrawable(accountType.getDisplayIcon(getContext()));
 
                 return convertView;
             }
@@ -199,11 +197,11 @@ public class AccountSelectionUtil {
             .create();
     }
 
-    public static void doImport(Context context, int resId,
-            AccountWithDataSet account) {
+    public static void doImport(Context context, int resId, AccountWithDataSet account,
+            int subscriptionId) {
         switch (resId) {
             case R.string.import_from_sim: {
-                doImportFromSim(context, account);
+                doImportFromSim(context, account, subscriptionId);
                 break;
             }
             case R.string.import_from_vcf_file: {
@@ -213,18 +211,15 @@ public class AccountSelectionUtil {
         }
     }
 
-    public static void doImportFromSim(Context context, AccountWithDataSet account) {
+    public static void doImportFromSim(Context context, AccountWithDataSet account,
+            int subscriptionId) {
         Intent importIntent = new Intent(SimContactsConstants.ACTION_MULTI_PICK_SIM);
         if (account != null) {
             importIntent.putExtra(SimContactsConstants.ACCOUNT_NAME, account.name);
             importIntent.putExtra(SimContactsConstants.ACCOUNT_TYPE, account.type);
             importIntent.putExtra(SimContactsConstants.ACCOUNT_DATA, account.dataSet);
         }
-        if (TelephonyManager.getDefault().isMultiSimEnabled()) {
-            importIntent.putExtra(PhoneConstants.SLOT_KEY, mImportSub);
-        } else {
-            importIntent.putExtra(PhoneConstants.SLOT_KEY,PhoneConstants.SUB1);
-        }
+            importIntent.putExtra(SimContactsConstants.SLOT_KEY, mImportSub);
         context.startActivity(importIntent);
     }
 

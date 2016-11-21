@@ -461,16 +461,6 @@ class AccountTypeManagerImpl extends AccountTypeManager
             extensionPackages.addAll(accountType.getExtensionPackageNames());
         }
 
-        // Add the local account, it does not appear in SyncAdapterTypes.
-        AccountType localAccountType = new PhoneAccountType(mContext, mContext.getPackageName());
-        addAccountType(localAccountType, accountTypesByTypeAndDataSet, accountTypesByType);
-
-        AccountWithDataSet localAccountWithDataSet = new AccountWithDataSet(
-            PhoneAccountType.ACCOUNT_NAME, PhoneAccountType.ACCOUNT_TYPE, null);
-        allAccounts.add(localAccountWithDataSet);
-        contactWritableAccounts.add(localAccountWithDataSet);
-        groupWritableAccounts.add(localAccountWithDataSet);
-
         // If any extension packages were specified, process them as well.
         if (!extensionPackages.isEmpty()) {
             Log.d(TAG, "Registering " + extensionPackages.size() + " extension packages");
@@ -602,12 +592,12 @@ class AccountTypeManagerImpl extends AccountTypeManager
     public List<AccountWithDataSet> getAccounts(boolean contactWritableOnly,
             int flag) {
         ensureAccountsLoaded();
-        boolean isAirMode = MoreContactUtils.isAPMOnAndSIMPowerDown(mContext);
+
         switch (flag) {
             case FLAG_ALL_ACCOUNTS:
                 return trimAccountByType(
-                        contactWritableOnly ? mContactWritableAccounts : mAccounts,
-                        isAirMode ? SimAccountType.ACCOUNT_TYPE : null);
+                    contactWritableOnly ? mContactWritableAccounts : mAccounts,
+                    null);
             case FLAG_ALL_ACCOUNTS_WITHOUT_LOCAL:
                 return trimAccountByType(
                         contactWritableOnly ? mContactWritableAccounts : mAccounts,
@@ -620,22 +610,11 @@ class AccountTypeManagerImpl extends AccountTypeManager
         return contactWritableOnly ? mContactWritableAccounts : mAccounts;
     }
 
-    private boolean isSimStateUnknown(AccountWithDataSet account) {
-        int subscription = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-        subscription = MoreContactUtils.getSubscription(account.type, account.name);
-
-        if (subscription > SubscriptionManager.INVALID_SUBSCRIPTION_ID
-                && TelephonyManager.from(mContext).getSimState(subscription)
-                    == TelephonyManager.SIM_STATE_UNKNOWN) {
-            return true;
-        } else {
-            return false;
-        }
-    }
-
     private boolean isSimAccountInvalid(AccountWithDataSet account) {
+        TelephonyManager tm = (TelephonyManager) mContext
+                .getSystemService(Context.TELEPHONY_SERVICE);
         if ((SimContactsConstants.ACCOUNT_TYPE_SIM).equals(account.type)) {
-            if (TelephonyManager.from(mContext).isMultiSimEnabled()) {
+            if (tm.getPhoneCount() > 1) {
                 if (account.name.equals(SimContactsConstants.SIM_NAME))
                     return true;
             } else {
@@ -659,9 +638,6 @@ class AccountTypeManagerImpl extends AccountTypeManager
                 }
             }
 
-            if (isSimStateUnknown(accountWithDataSet)) {
-                continue outer;
-            }
             if (isSimAccountInvalid(accountWithDataSet)) {
                 continue outer;
             }

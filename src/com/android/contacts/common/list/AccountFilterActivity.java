@@ -62,6 +62,10 @@ public class AccountFilterActivity extends Activity implements AdapterView.OnIte
 
     private ContactListFilter mCurrentFilter;
 
+    private ContactListFilterView mCustomFilterView; // the "Customize" filter
+
+    private boolean mIsCustomFilterViewSelected;
+
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
@@ -120,8 +124,7 @@ public class AccountFilterActivity extends Activity implements AdapterView.OnIte
                 // Hide extensions with no raw_contacts.
                 continue;
             }
-            Drawable icon = accountType != null ? accountType.getDisplayIcon(
-                    context, account.name) : null;
+            Drawable icon = accountType != null ? accountType.getDisplayIcon(context) : null;
             accountFilters.add(ContactListFilter.createAccountFilter(
                     account.type, account.name, account.dataSet, icon));
         }
@@ -166,13 +169,23 @@ public class AccountFilterActivity extends Activity implements AdapterView.OnIte
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+        final ContactListFilterView listFilterView = (ContactListFilterView) view;
         final ContactListFilter filter = (ContactListFilter) view.getTag();
         if (filter == null) return; // Just in case
         if (filter.filterType == ContactListFilter.FILTER_TYPE_CUSTOM) {
+            mCustomFilterView = listFilterView;
+            mIsCustomFilterViewSelected = listFilterView.isChecked();
             final Intent intent = new Intent(this,
                     CustomContactListFilterActivity.class);
+            listFilterView.setActivated(true);
+            // Switching activity has the highest priority. So when we open another activity, the
+            // announcement that indicates an account is checked will be interrupted. This is the
+            // way to overcome -- View.announceForAccessibility(CharSequence text);
+            listFilterView.announceForAccessibility(listFilterView.generateContentDescription());
             startActivityForResult(intent, SUBACTIVITY_CUSTOMIZE_FILTER);
         } else {
+            listFilterView.setActivated(true);
+            listFilterView.announceForAccessibility(listFilterView.generateContentDescription());
             final Intent intent = new Intent();
             intent.putExtra(KEY_EXTRA_CONTACT_LIST_FILTER, filter);
             setResult(Activity.RESULT_OK, intent);
@@ -182,6 +195,12 @@ public class AccountFilterActivity extends Activity implements AdapterView.OnIte
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (resultCode == Activity.RESULT_CANCELED && mCustomFilterView != null &&
+                !mIsCustomFilterViewSelected) {
+            mCustomFilterView.setActivated(false);
+            return;
+        }
+
         if (resultCode != Activity.RESULT_OK) {
             return;
         }

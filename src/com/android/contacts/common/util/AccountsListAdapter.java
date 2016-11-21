@@ -43,6 +43,7 @@ public final class AccountsListAdapter extends BaseAdapter {
     private final List<AccountWithDataSet> mAccounts;
     private final AccountTypeManager mAccountTypes;
     private final Context mContext;
+    private int mCustomLayout = -1;
 
     /**
      * Filters that affect the list of accounts that is displayed by this adapter.
@@ -67,7 +68,6 @@ public final class AccountsListAdapter extends BaseAdapter {
         mContext = context;
         mAccountTypes = AccountTypeManager.getInstance(context);
         mAccounts = getAccounts(accountListFilter);
-
         if (currentAccount != null
                 && !mAccounts.isEmpty()
                 && !mAccounts.get(0).equals(currentAccount)
@@ -80,7 +80,7 @@ public final class AccountsListAdapter extends BaseAdapter {
     private List<AccountWithDataSet> getAccounts(AccountListFilter accountListFilter) {
         if (accountListFilter == AccountListFilter.ACCOUNTS_GROUP_WRITABLE) {
             return new ArrayList<AccountWithDataSet>(mAccountTypes.getAccounts(true,
-                    AccountTypeManager.FLAG_ALL_ACCOUNTS_WITHOUT_SIM));
+                    AccountTypeManager.FLAG_ALL_ACCOUNTS_WITHOUT_LOCAL));
         }
         final List<AccountWithDataSet> writableAccountList = mAccountTypes
                 .getAccounts(accountListFilter == AccountListFilter.ACCOUNTS_CONTACT_WRITABLE
@@ -97,10 +97,15 @@ public final class AccountsListAdapter extends BaseAdapter {
         return writableAccountList;
     }
 
+    public void setCustomLayout(int customLayout) {
+        mCustomLayout = customLayout;
+    }
+
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
-        final View resultView = convertView != null ? convertView
-                : mInflater.inflate(R.layout.account_selector_list_item, parent, false);
+        final View resultView = convertView != null ? convertView :
+                mInflater.inflate(mCustomLayout > 0 ? mCustomLayout :
+                        R.layout.account_selector_list_item, parent, false);
 
         final TextView text1 = (TextView) resultView.findViewById(android.R.id.text1);
         final TextView text2 = (TextView) resultView.findViewById(android.R.id.text2);
@@ -109,20 +114,14 @@ public final class AccountsListAdapter extends BaseAdapter {
         final AccountWithDataSet account = mAccounts.get(position);
         final AccountType accountType = mAccountTypes.getAccountType(account.type, account.dataSet);
 
-        text1.setText(accountType.getDisplayLabel(mContext, account.name));
+        text1.setText(accountType.getDisplayLabel(mContext));
 
         // For email addresses, we don't want to truncate at end, which might cut off the domain
         // name.
-        if (SimAccountType.ACCOUNT_TYPE.equals(account.type)
-                || PhoneAccountType.ACCOUNT_TYPE.equals(account.type)) {
-            text2.setVisibility(View.GONE);
-        } else {
-            text2.setVisibility(View.VISIBLE);
-        }
         text2.setText(account.name);
         text2.setEllipsize(TruncateAt.MIDDLE);
 
-        icon.setImageDrawable(accountType.getDisplayIcon(mContext, account.name));
+        icon.setImageDrawable(accountType.getDisplayIcon(mContext));
 
         return resultView;
     }

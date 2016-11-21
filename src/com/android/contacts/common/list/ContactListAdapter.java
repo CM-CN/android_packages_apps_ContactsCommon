@@ -25,14 +25,15 @@ import android.provider.ContactsContract.Directory;
 import android.provider.ContactsContract.RawContacts;
 import android.provider.ContactsContract.SearchSnippets;
 import android.text.TextUtils;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ListView;
 
-import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.R;
+import com.android.contacts.common.compat.ContactsCompat;
 import com.android.contacts.common.preference.ContactsPreferences;
+
+import java.util.TreeSet;
 
 /**
  * A cursor adapter for the {@link ContactsContract.Contacts#CONTENT_TYPE} content type.
@@ -51,8 +52,9 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            RawContacts.ACCOUNT_TYPE,               // 8
-            RawContacts.ACCOUNT_NAME,               // 9
+            Contacts.PHONETIC_NAME,                 // 8
+            RawContacts.ACCOUNT_TYPE,               // 9
+            RawContacts.ACCOUNT_NAME,               // 10
         };
 
         private static final String[] CONTACT_PROJECTION_ALTERNATIVE = new String[] {
@@ -64,8 +66,9 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            RawContacts.ACCOUNT_TYPE,               // 8
-            RawContacts.ACCOUNT_NAME,               // 9
+            Contacts.PHONETIC_NAME,                 // 8
+            RawContacts.ACCOUNT_TYPE,               // 9
+            RawContacts.ACCOUNT_NAME,               // 10
         };
 
         private static final String[] FILTER_PROJECTION_PRIMARY = new String[] {
@@ -77,9 +80,12 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            RawContacts.ACCOUNT_TYPE,               // 8
-            RawContacts.ACCOUNT_NAME,               // 9
-            SearchSnippets.SNIPPET,                 // 10
+            Contacts.PHONETIC_NAME,                 // 8
+            RawContacts.ACCOUNT_TYPE,               // 9
+            RawContacts.ACCOUNT_NAME,               // 10
+            Contacts.LAST_TIME_CONTACTED,           // 11
+            Contacts.STARRED,                       // 12
+            SearchSnippets.SNIPPET,                 // 13
         };
 
         private static final String[] FILTER_PROJECTION_ALTERNATIVE = new String[] {
@@ -91,9 +97,12 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             Contacts.PHOTO_THUMBNAIL_URI,           // 5
             Contacts.LOOKUP_KEY,                    // 6
             Contacts.IS_USER_PROFILE,               // 7
-            RawContacts.ACCOUNT_TYPE,               // 8
-            RawContacts.ACCOUNT_NAME,               // 9
-            SearchSnippets.SNIPPET,                 // 10
+            Contacts.PHONETIC_NAME,                 // 8
+            RawContacts.ACCOUNT_TYPE,               // 9
+            RawContacts.ACCOUNT_NAME,               // 10
+            Contacts.LAST_TIME_CONTACTED,           // 11
+            Contacts.STARRED,                       // 12
+            SearchSnippets.SNIPPET,                 // 13
         };
 
         public static final int CONTACT_ID               = 0;
@@ -104,9 +113,12 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
         public static final int CONTACT_PHOTO_URI        = 5;
         public static final int CONTACT_LOOKUP_KEY       = 6;
         public static final int CONTACT_IS_USER_PROFILE  = 7;
-        public static final int CONTACT_ACCOUNT_TYPE      = 8;
-        public static final int CONTACT_ACCOUNT_NAME     = 9;
-        public static final int CONTACT_SNIPPET          = 10;
+        public static final int CONTACT_PHONETIC_NAME    = 8;
+        public static final int CONTACT_ACCOUNT_TYPE     = 9;
+        public static final int CONTACT_ACCOUNT_NAME     = 10;
+        public static final int CONTACT_LAST_TIME_CONTACTED = 11;
+        public static final int CONTACT_STARRED          = 12;
+        public static final int CONTACT_SNIPPET          = 13;
     }
 
     private CharSequence mUnknownNameText;
@@ -182,6 +194,15 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
                     ContactsContract.DIRECTORY_PARAM_KEY, String.valueOf(directoryId)).build();
         }
         return uri;
+    }
+
+    public boolean isEnterpriseContact(int position) {
+        final Cursor cursor = (Cursor) getItem(position);
+        if (cursor != null) {
+            final long contactId = cursor.getLong(ContactQuery.CONTACT_ID);
+            return ContactsCompat.isEnterpriseContactId(contactId);
+        }
+        return false;
     }
 
     /**
@@ -335,6 +356,25 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
             position++;
         }
         return position;
+    }
+
+    public TreeSet<Long> getAllVisibleContactIds() {
+        TreeSet<Long> contactIds = new TreeSet<Long>();
+        Cursor cursor = null;
+        int partitionCount = getPartitionCount();
+        for (int i = 0; i < partitionCount; i++) {
+            DirectoryPartition partition = (DirectoryPartition) getPartition(i);
+            if (partition.isLoading()) {
+                continue;
+            }
+            cursor = getCursor(i);
+            if (cursor == null) continue;
+            if (!cursor.moveToFirst()) continue;
+            do {
+                contactIds.add(cursor.getLong(ContactQuery.CONTACT_ID));
+            } while(cursor.moveToNext());
+        }
+        return contactIds;
     }
 
     public boolean hasValidSelection() {
